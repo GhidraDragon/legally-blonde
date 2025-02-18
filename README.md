@@ -13,6 +13,15 @@ Disclosure: everything factually related to Linkedin was not checked. It's not l
 ![image](https://github.com/user-attachments/assets/7f0a801f-9dc9-423e-936e-41a82255238b)
 
 what if pokimane asked her boyfriend to defend her??? oh no eggplant_emoji is so scared of that.... 😇😇😇😇😇
+
+
+![image](https://github.com/user-attachments/assets/1bd40b52-86ce-4882-8a09-031dccf7d06c)
+
+
+while i may have made an http call request to the os in built camera, i do have less professional experience than you too 😇😇😇 
+
+rather than declare an object of the UIKit class to access the camera method which transfers data because it's an object in swift, into PDFKit into ur mom's vagina
+
 **
 So this bot has yet to be integrated with my own logic for ML and RL gym-style exploitation; I welcome you to look at pong being rendered on matplotlib from zero to alpha, within a free Colab notebook you could clone
 **
