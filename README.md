@@ -20,7 +20,12 @@ what if pokimane asked her boyfriend to defend her??? oh no eggplant_emoji is so
 
 while i may have made an http call request to the os in built camera, i do have less professional experience than you too 😇😇😇 
 
-rather than declare an object of the UIKit class to access the camera method which transfers data because it's an object in swift, into PDFKit into ur mom's vagina
+rather than declare an object of the UIKit class to access the camera method which transfers data because it's an object in swift, into PDFKit into ur mom's vagina; don't forget about "UIViewControllerRepresentable, which is used in SwiftUI to wrap a UIViewController so it can be used in a SwiftUI environment" - model o3-mini-high
+
+paste this poki
+
+![image](https://github.com/user-attachments/assets/458a3857-f855-45c5-aa2a-f765b886eb74)
+
 
 **
 So this bot has yet to be integrated with my own logic for ML and RL gym-style exploitation; I welcome you to look at pong being rendered on matplotlib from zero to alpha, within a free Colab notebook you could clone
