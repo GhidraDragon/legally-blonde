@@ -8,9 +8,9 @@ Disclosure: everything factually related to Linkedin was not checked. It's not l
 ![image](https://github.com/user-attachments/assets/7f0a801f-9dc9-423e-936e-41a82255238b)
 
 what if pokimane asked her boyfriend to defend her??? oh no eggplant_emoji is so scared of that.... 😇😇😇😇😇
-
+**
 So this bot has yet to be integrated with my own logic for ML and RL gym-style exploitation; I welcome you to look at pong being rendered on matplotlib from zero to alpha, within a free Colab notebook you could clone
-
+**
  "https://www.whitehouse.gov": {
     "ip_address": "192.0.66.51",
     "os_guess": "OS fingerprinting inconclusive",
