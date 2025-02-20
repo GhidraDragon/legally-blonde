@@ -1,5 +1,8 @@
 # legally-blonde
 
+![image](https://github.com/user-attachments/assets/0660967f-65de-4534-8dbd-9c8db5632cea)
+
+
 Let me explain how this works Poki... If I could borrow index.html from another device, and well u can't stop me from replicatin' (unless u find a way, or post propaganda)
 
 Then in theory I could follow little marco around, while borrowing index.html from whitehouse.gov in order to feed little marco some PLA propaganda while he belives he's really visiting index.html to receive guidance from Big Don 😇😇😇😇😇
