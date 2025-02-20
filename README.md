@@ -1,3 +1,9 @@
+This is the most efficient global traversal algorithm available, literally (assuning it works properly which today I looked at it seems to). I have yet to look at or change a single line of code. I was wondering why no results or when results (im tired) but it's because depth is 10 which you could change or I could.
+
+Anyways if the White House and US District of Northern Cal (neither are closed I've seen wikiepdia and a mediocre fruit.com) but it is more illustrative to have 2 startin' nodes, cuz you could see how each layer of BFS works, when it's a mix of both, then the next one, etc. and the first BFS included both wikipedia and a meidocre fruit etc.
+
+Anyways, please enjoy with your own enhancements, to infinity and AGI beyond! Why not build a search engine? Figure out how to index what people search for from the data you scrape from here, since it doesn't revisit any already, and etc. Figure out how many mediocre fruit links (they have so many pages) you want to reach BFS from white house etc. JK it's just depth!
+
 # legally-blonde
 
 ![image](https://github.com/user-attachments/assets/0660967f-65de-4534-8dbd-9c8db5632cea)
