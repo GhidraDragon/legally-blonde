@@ -1,27 +1,27 @@
 import os
 import time
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options
+import random
+import subprocess
+import sys
 
 def scan_with_chromedriver(url, screenshot_dir):
-    print(f"[ChromeDriver] Launching for {url}")
-    data = ""
-    error = ""
     try:
-        opts = Options()
-        opts.add_argument("--headless=new")
-        # Adjust chrome binary path if needed
-        service = ChromeService("chromedriver")
-        driver = webdriver.Chrome(service=service, options=opts)
-        print(f"[ChromeDriver] Visiting: {url}")
-        driver.get(url)
-        data = driver.page_source
-        screenshot_path = os.path.join(screenshot_dir, f"screenshot_{int(time.time() * 1000)}.png")
-        driver.save_screenshot(screenshot_path)
-        print(f"[ChromeDriver] Screenshot saved to: {screenshot_path}")
-        driver.quit()
+        screenshot_file = os.path.join(screenshot_dir, f"screenshot_{int(time.time()*1000)}.png")
+        cmd = [
+            "chromedriver",
+            "--url-base=/wd/hub"
+        ]
+        chrome_cmd = [
+            "chrome-headless-shell",
+            "--no-sandbox",
+            "--headless",
+            f"--screenshot={screenshot_file}",
+            url
+        ]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        time.sleep(random.uniform(1,2))
+        p = subprocess.run(chrome_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        data = p.stdout.decode('utf-8', errors='ignore') + p.stderr.decode('utf-8', errors='ignore')
+        return {"error":"","data":data,"screenshot":screenshot_file}
     except Exception as e:
-        error = str(e)
-        print(f"[ChromeDriver] Error: {error}")
-    return {"url": url, "error": error, "data": data}
+        return {"error":str(e),"data":"","screenshot":""}
