@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
-
+import gym
 try:
     import tensorflow as tf
     from tensorflow.keras.models import Sequential, load_model
@@ -585,6 +585,36 @@ def train_all_vulnerability_models():
             model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
             model.save(mp)
 
+class VulnScanEnv(gym.Env):
+    def __init__(self):
+        super().__init__()
+        self.action_space = gym.spaces.Discrete(len(test_sites))
+        self.observation_space = gym.spaces.Discrete(2)
+        self.current_step = 0
+        self.flag_pattern = re.compile(r"flag\{.*?\}", re.IGNORECASE)
+        self.test_sites = test_sites
+        self.done = False
+    def reset(self):
+        self.current_step = 0
+        self.done = False
+        return 0
+    def step(self, action):
+        if self.done:
+            return 0, 0, True, {}
+        site = self.test_sites[action]
+        res = scan_target(site)
+        reward = 0
+        if "body" in res:
+            body = res["body"]
+            if self.flag_pattern.search(body):
+                reward = 10
+        if res.get("matched_details"):
+            reward += len(res["matched_details"])
+        self.current_step += 1
+        if self.current_step >= 5:
+            self.done = True
+        return 1, reward, self.done, {}
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
@@ -602,6 +632,13 @@ def main():
                 print(f"    {f_}")
     write_scan_results_text(all_results,"scan_results.txt")
     write_scan_results_json(all_results)
+    env = VulnScanEnv()
+    obs = env.reset()
+    for _ in range(10):
+        action = env.action_space.sample()
+        obs, reward, done, _ = env.step(action)
+        if done:
+            break
 
 if __name__=="__main__":
     main()
