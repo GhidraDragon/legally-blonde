@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import html
 import time
@@ -9,18 +10,26 @@ import sqlite3
 import urllib.parse
 import requests
 import concurrent.futures
-import sys
 from pathlib import Path
 from bs4 import BeautifulSoup
-from test_sites import test_sites
+import gym
+import tensorflow as tf
+from tensorflow.keras import layers
+
+# Check for --retrain flag and disable GPU/CUDNN if set
+RETRAIN_FLAG = ('--retrain' in sys.argv)
+if RETRAIN_FLAG:
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+ML_CLASSIFIER_AVAILABLE = False
+SELENIUM_AVAILABLE = False
 
 try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.linear_model import LogisticRegression
-    import joblib
+    import tensorflow as tf
+    tf.config.optimizer.set_experimental_options({'cudnn_enabled': False})
     ML_CLASSIFIER_AVAILABLE = True
 except ImportError:
-    ML_CLASSIFIER_AVAILABLE = False
+    pass
 
 try:
     from selenium import webdriver
@@ -28,10 +37,12 @@ try:
     from selenium.webdriver.chrome.options import Options
     SELENIUM_AVAILABLE = True
 except ImportError:
-    SELENIUM_AVAILABLE = False
+    pass
 
-XSS_MODEL_PATH = "xss_js_model.joblib"
-SQLI_MODEL_PATH = "sql_injection_model.joblib"
+from test_sites import test_sites
+
+XSS_MODEL_PATH = "xss_js_model"
+SQLI_MODEL_PATH = "sql_injection_model"
 MULTI_MODELS_DIR = "ml_models"
 MAX_BODY_SNIPPET_LEN = 5000
 ENABLE_HEADER_SCANNING = True
@@ -39,11 +50,23 @@ ENABLE_FORM_PARSING = True
 CUSTOM_HEADERS = {"User-Agent":"ImprovedSecurityScanner/1.0"}
 
 XSS_REGEXES = [
-    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",r"<\s*img[^>]+onerror\s*=.*?>",r"<\s*svg[^>]*on(load|error)\s*=",
-    r"<\s*iframe\b.*?>",r"<\s*body\b[^>]*onload\s*=",r"javascript\s*:",r"<\s*\w+\s+on\w+\s*=",
-    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",r"&#x3c;\s*script\s*&#x3e;",r"<scr(?:.*?)ipt>",r"</scr(?:.*?)ipt>",
-    r"<\s*script[^>]*src\s*=.*?>",r"expression\s*\(",r"vbscript\s*:",r"mozbinding\s*:",
-    r"javascript:alert\(document.domain\)","<script src=['\"]http://[^>]*?>"
+    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",
+    r"<\s*img[^>]+onerror\s*=.*?>",
+    r"<\s*svg[^>]*on(load|error)\s*=",
+    r"<\s*iframe\b.*?>",
+    r"<\s*body\b[^>]*onload\s*=",
+    r"javascript\s*:",
+    r"<\s*\w+\s+on\w+\s*=",
+    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",
+    r"&#x3c;\s*script\s*&#x3e;",
+    r"<scr(?:.*?)ipt>",
+    r"</scr(?:.*?)ipt>",
+    r"<\s*script[^>]*src\s*=.*?>",
+    r"expression\s*\(",
+    r"vbscript\s*:",
+    r"mozbinding\s*:",
+    r"javascript:alert\(document.domain\)",
+    "<script src=['\"]http://[^>]*?>"
 ]
 
 VULN_PATTERNS = {
@@ -185,62 +208,36 @@ MULTI_VULN_SAMPLES = {
     "npm Token":(["npm_token_123456789012345678901234567890123456"],["safe usage"])
 }
 
-def train_base_ml_models():
-    if not ML_CLASSIFIER_AVAILABLE:
-        return
-    if not os.path.isfile(XSS_MODEL_PATH):
-        sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
-        ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
-        X_data = sus_js + ben_js
-        y_data = [1]*len(sus_js) + [0]*len(ben_js)
-        vec = TfidfVectorizer(ngram_range=(1,2),max_features=500)
-        X_vec = vec.fit_transform(X_data)
-        clf = LogisticRegression()
-        clf.fit(X_vec,y_data)
-        joblib.dump({"vectorizer":vec,"classifier":clf},XSS_MODEL_PATH)
-    if not os.path.isfile(SQLI_MODEL_PATH):
-        sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
-        ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
-        X_data = sus_sql + ben_sql
-        y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
-        vec = TfidfVectorizer(ngram_range=(1,2),max_features=500)
-        X_vec = vec.fit_transform(X_data)
-        clf = LogisticRegression()
-        clf.fit(X_vec,y_data)
-        joblib.dump({"vectorizer":vec,"classifier":clf},SQLI_MODEL_PATH)
-
-def train_all_vulnerability_models():
-    if not ML_CLASSIFIER_AVAILABLE:
-        return
-    if not os.path.isdir(MULTI_MODELS_DIR):
-        os.makedirs(MULTI_MODELS_DIR)
-    for vuln_name,(suspicious,benign) in MULTI_VULN_SAMPLES.items():
-        mp = os.path.join(MULTI_MODELS_DIR,f"{vuln_name.replace(' ','_').replace(':','').replace('/','_')}.joblib")
-        if not os.path.isfile(mp):
-            X_data = suspicious + benign
-            y_data = [1]*len(suspicious) + [0]*len(benign)
-            vec = TfidfVectorizer(ngram_range=(1,2),max_features=300)
-            X_vec = vec.fit_transform(X_data)
-            clf = LogisticRegression()
-            clf.fit(X_vec,y_data)
-            joblib.dump({"vectorizer":vec,"classifier":clf},mp)
+# Fixed function: Removed 'train_dataset' argument so it aligns with usage below.
+def build_text_classification_model():
+    vectorizer = layers.TextVectorization(
+        max_tokens=1000,
+        output_mode='tf-idf'
+    )
+    model = tf.keras.Sequential([
+        layers.Input(shape=(1,), dtype=tf.string),
+        vectorizer,
+        layers.Dense(8, activation='relu'),
+        layers.Dense(1, activation='sigmoid')
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
 
 def load_ml_model(path):
-    if not ML_CLASSIFIER_AVAILABLE or not os.path.isfile(path):
+    if not ML_CLASSIFIER_AVAILABLE or RETRAIN_FLAG:
+        return None
+    if not os.path.exists(path):
         return None
     try:
-        return joblib.load(path)
+        return tf.keras.models.load_model(path)
     except:
         return None
 
 def ml_detection_confidence(snippet,model):
     if not model:
         return (0.0,False)
-    v = model["vectorizer"]
-    c = model["classifier"]
-    X = v.transform([snippet])
-    prob = c.predict_proba(X)[0][1]
-    return (prob,prob>=0.5)
+    prob = model.predict([snippet])[0][0]
+    return (float(prob), prob >= 0.5)
 
 def normalize_and_decode(text):
     if not text:
@@ -339,7 +336,15 @@ def analyze_query_params(url):
 
 def fuzz_injection_tests(url):
     fs = []
-    pl = ["' OR '1'='1","<script>alert(1)</script>","; ls;","&& cat /etc/passwd","<img src=x onerror=alert(2)>","'; DROP TABLE users; --","|| ping -c 4 127.0.0.1 ||"]
+    pl = [
+        "' OR '1'='1",
+        "<script>alert(1)</script>",
+        "; ls;",
+        "&& cat /etc/passwd",
+        "<img src=x onerror=alert(2)>",
+        "'; DROP TABLE users; --",
+        "|| ping -c 4 127.0.0.1 ||"
+    ]
     for p in pl:
         time.sleep(random.uniform(1.2,2.5))
         try:
@@ -402,13 +407,14 @@ def scan_target(url):
                     sn = b[:200]+"..." if len(b)>200 else b
                     ml_tags.append(label_entry("SQL Injection",f"ML-based detection (score={prob:.3f})",sn,prob))
             for vn in MULTI_VULN_SAMPLES.keys():
-                mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.joblib")
-                mm = load_ml_model(mp)
-                if mm:
-                    prob,pred = ml_detection_confidence(b,mm)
-                    if pred:
-                        sn = b[:200]+"..." if len(b)>200 else b
-                        ml_tags.append(label_entry(vn,f"ML-based detection (score={prob:.3f})",sn,prob))
+                mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.h5")
+                if os.path.exists(mp) and not RETRAIN_FLAG:
+                    mm = load_ml_model(mp)
+                    if mm:
+                        prob,pred = ml_detection_confidence(b,mm)
+                        if pred:
+                            sn = b[:200]+"..." if len(b)>200 else b
+                            ml_tags.append(label_entry(vn,f"ML-based detection (score={prob:.3f})",sn,prob))
         all_tags = ds + p_tags + h_tags + f_tags + d_tags + ml_tags
         funcs = extract_js_functions(r.text)
         return {
@@ -497,8 +503,8 @@ def scan_with_chromedriver(url):
         time.sleep(random.uniform(1.0,2.0))
         o = Options()
         o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
-        s = ChromeService("chromedriver")
+        o.binary_location = "chrome-linux64/chrome"
+        s = ChromeService("chromedriver-linux64/chromedriver")
         d = webdriver.Chrome(service=s,options=o)
         d.get(url)
         c = d.page_source
@@ -561,6 +567,96 @@ def bfs_crawl_and_scan(starts,max_depth=10):
     bot_executor.shutdown()
     return results
 
+def train_base_ml_models():
+    ML_CLASSIFIER_AVAILABLE = True
+    RETRAIN_FLAG = True
+    XSS_MODEL_PATH = "models/xss"
+    SQLI_MODEL_PATH = "models/sqli"
+
+    if not ML_CLASSIFIER_AVAILABLE:
+        return
+    if RETRAIN_FLAG:
+        if os.path.exists(XSS_MODEL_PATH):
+            shutil.rmtree(XSS_MODEL_PATH)
+        if os.path.exists(SQLI_MODEL_PATH):
+            shutil.rmtree(SQLI_MODEL_PATH)
+    if not os.path.exists(XSS_MODEL_PATH):
+        sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
+        ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
+        X_data = sus_js + ben_js
+        y_data = [1]*len(sus_js) + [0]*len(ben_js)
+        model = build_text_classification_model()
+        model.layers[1].adapt(X_data)
+        model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
+        model.save(XSS_MODEL_PATH)
+    if not os.path.exists(SQLI_MODEL_PATH):
+        sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
+        ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
+        X_data = sus_sql + ben_sql
+        y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
+        model = build_text_classification_model()
+        model.layers[1].adapt(X_data)
+        model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
+        model.save(SQLI_MODEL_PATH)
+
+def train_all_vulnerability_models():
+    if not ML_CLASSIFIER_AVAILABLE:
+        return
+    if not os.path.isdir(MULTI_MODELS_DIR):
+        os.makedirs(MULTI_MODELS_DIR)
+    if RETRAIN_FLAG:
+        import shutil
+        if os.path.isdir(MULTI_MODELS_DIR):
+            for f_ in os.listdir(MULTI_MODELS_DIR):
+                fp = os.path.join(MULTI_MODELS_DIR,f_)
+                if os.path.isdir(fp) or fp.endswith(".h5"):
+                    try:
+                        if os.path.isdir(fp):
+                            shutil.rmtree(fp)
+                        else:
+                            os.remove(fp)
+                    except:
+                        pass
+    for vuln_name,(suspicious,benign) in MULTI_VULN_SAMPLES.items():
+        mp = os.path.join(MULTI_MODELS_DIR,f"{vuln_name.replace(' ','_').replace(':','').replace('/','_')}.h5")
+        if not os.path.exists(mp):
+            X_data = suspicious + benign
+            y_data = [1]*len(suspicious) + [0]*len(benign)
+            model = build_text_classification_model()
+            model.layers[1].adapt(X_data)
+            model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
+            model.save(mp)
+
+class VulnScanEnv(gym.Env):
+    def __init__(self):
+        super().__init__()
+        self.action_space = gym.spaces.Discrete(len(test_sites))
+        self.observation_space = gym.spaces.Discrete(2)
+        self.current_step = 0
+        self.flag_pattern = re.compile(r"flag\{.*?\}", re.IGNORECASE)
+        self.test_sites = test_sites
+        self.done = False
+    def reset(self):
+        self.current_step = 0
+        self.done = False
+        return 0
+    def step(self, action):
+        if self.done:
+            return 0, 0, True, {}
+        site = self.test_sites[action]
+        res = scan_target(site)
+        reward = 0
+        if "body" in res:
+            body = res["body"]
+            if self.flag_pattern.search(body):
+                reward = 10
+        if res.get("matched_details"):
+            reward += len(res["matched_details"])
+        self.current_step += 1
+        if self.current_step >= 5:
+            self.done = True
+        return 1, reward, self.done, {}
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
@@ -578,6 +674,13 @@ def main():
                 print(f"    {f_}")
     write_scan_results_text(all_results,"scan_results.txt")
     write_scan_results_json(all_results)
+    env = VulnScanEnv()
+    obs = env.reset()
+    for _ in range(10):
+        action = env.action_space.sample()
+        obs, reward, done, _ = env.step(action)
+        if done:
+            break
 
 if __name__=="__main__":
     main()
