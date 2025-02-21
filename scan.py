@@ -506,77 +506,98 @@ def scan_with_chromedriver(url):
         return {"url":url,"error":"","data":c}
     except Exception as e:
         return {"url":url,"error":str(e),"data":""}
-
-def bfs_crawl_and_scan(starts,max_depth=10):
+def bfs_crawl_and_scan(starts, depth=2):
     visited = set()
+    bfs_tree = {}
     q = []
     for s in starts:
-        heapq.heappush(q,(0,s))
+        heapq.heappush(q, (0, s))
+        bfs_tree[s] = []
     results = []
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     while q:
-        d,u = heapq.heappop(q)
+        d, u = heapq.heappop(q)
         if u in visited:
             continue
-        if d>max_depth:
+        if d > depth:
             break
         visited.add(u)
-        time.sleep(random.uniform(0.3,0.8))
-        f1 = http_executor.submit(scan_target,u)
-        f2 = bot_executor.submit(scan_with_chromedriver,u)
+        f1 = http_executor.submit(scan_target, u)
+        f2 = bot_executor.submit(scan_with_chromedriver, u)
         r1 = f1.result()
         r2 = f2.result()
-        body1 = r1["body"] if "body" in r1 else ""
-        body2 = r2["data"] if "data" in r2 else ""
+        b1 = r1.get("body", "")
+        b2 = r2.get("data", "")
+        bfs_tree[u] = []
         if "error" not in r1:
-            new_links = extract_links_from_html(u,body1)
+            new_links = extract_links_from_html(u, b1)
             for nl in new_links:
                 if nl not in visited:
-                    heapq.heappush(q,(d+1,nl))
-        if body2:
-            new_links2 = extract_links_from_html(u,body2)
+                    heapq.heappush(q, (d + 1, nl))
+                    if nl not in bfs_tree:
+                        bfs_tree[nl] = []
+                    bfs_tree[u].append(nl)
+        if b2:
+            new_links2 = extract_links_from_html(u, b2)
             for nl2 in new_links2:
                 if nl2 not in visited:
-                    heapq.heappush(q,(d+1,nl2))
-        combined_details = r1["matched_details"] if "matched_details" in r1 else []
+                    heapq.heappush(q, (d + 1, nl2))
+                    if nl2 not in bfs_tree:
+                        bfs_tree[nl2] = []
+                    bfs_tree[u].append(nl2)
+        c_details = r1.get("matched_details", [])
         if r2["error"]:
-            combined_details.append(label_entry("ChromeDriver Error","browser-based detection",r2["error"]))
+            c_details.append(label_entry("ChromeDriver Error", "browser-based detection", r2["error"]))
         else:
-            combined_details.extend(scan_for_vuln_patterns(body2))
-        combined_js = r1.get("extracted_js_functions",[])
-        if body2:
-            combined_js.extend(extract_js_functions(body2))
+            c_details.extend(scan_for_vuln_patterns(b2))
+        c_js = r1.get("extracted_js_functions", [])
+        if b2:
+            c_js.extend(extract_js_functions(b2))
         final = {
-            "url":u,
-            "server":r1.get("server","Unknown"),
-            "status_code":r1.get("status_code","N/A"),
-            "reason":r1.get("reason","N/A"),
-            "error":r1.get("error","") or r2.get("error",""),
-            "matched_details":combined_details,
-            "extracted_js_functions":combined_js
+            "url": u,
+            "server": r1.get("server", "Unknown"),
+            "status_code": r1.get("status_code", "N/A"),
+            "reason": r1.get("reason", "N/A"),
+            "error": r1.get("error", "") or r2.get("error", ""),
+            "matched_details": c_details,
+            "extracted_js_functions": c_js
         }
         results.append(final)
     http_executor.shutdown()
     bot_executor.shutdown()
-    return results
+    return results, bfs_tree
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--depth", type=int, default=2, help="Max BFS depth")
+    args = parser.parse_args()
+
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
     train_all_vulnerability_models()
-    all_results = bfs_crawl_and_scan(test_sites,10)
+    all_results, bfs_tree = bfs_crawl_and_scan(test_sites, args.depth)
+
     for r in all_results:
         print(f"\nServer: {r.get('server','Unknown')} | {r['url']}")
-        if "error" in r and r["error"]:
+        if r["error"]:
             print(f"  Error: {r['error']}")
-        for pt,tactic,snippet,explanation,conf in r["matched_details"]:
+        for pt, tactic, snippet, explanation, conf in r["matched_details"]:
             print(f"  Detected: {pt}\n    Explanation: {explanation}\n    Tactic: {tactic}\n    Snippet: {snippet}")
         if r.get("extracted_js_functions"):
             print("  Extracted JS Functions:")
             for f_ in r["extracted_js_functions"]:
                 print(f"    {f_}")
-    write_scan_results_text(all_results,"scan_results.txt")
+
+    with open("priority_bfs_tree.json", "w", encoding="utf-8") as f:
+        json.dump(bfs_tree, f, indent=2)
+
+    print("\nPriorityBFS Tree:")
+    for node, children in bfs_tree.items():
+        print(node, "->", children)
+
+    write_scan_results_text(all_results, "scan_results.txt")
     write_scan_results_json(all_results)
 
 if __name__=="__main__":
