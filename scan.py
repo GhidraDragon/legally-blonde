@@ -497,8 +497,8 @@ def scan_with_chromedriver(url):
         time.sleep(random.uniform(1.0,2.0))
         o = Options()
         o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
-        s = ChromeService("chromedriver")
+        o.binary_location = "chrome-linux64/chrome"
+        s = ChromeService("chromedriver-linux64/chromedriver")
         d = webdriver.Chrome(service=s,options=o)
         d.get(url)
         c = d.page_source
