@@ -489,23 +489,29 @@ def extract_links_from_html(url,html_text):
     except:
         pass
     return links
-
-def scan_with_chromedriver(url):
-    if not SELENIUM_AVAILABLE:
-        return {"url":url,"error":"Selenium not available","data":""}
+def scan_with_chromedriver(url, screenshot_dir):
+    print(f"[ChromeDriver] Launching for {url}")
+    data = ""
+    error = ""
     try:
-        time.sleep(random.uniform(1.0,2.0))
-        o = Options()
-        o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
-        s = ChromeService("chromedriver")
-        d = webdriver.Chrome(service=s,options=o)
-        d.get(url)
-        c = d.page_source
-        d.quit()
-        return {"url":url,"error":"","data":c}
+        opts = Options()
+        opts.add_argument("--headless=new")
+        # Adjust chrome binary path if needed
+        service = ChromeService("chromedriver")
+        driver = webdriver.Chrome(service=service, options=opts)
+        print(f"[ChromeDriver] Visiting: {url}")
+        driver.get(url)
+        data = driver.page_source
+        screenshot_path = os.path.join(screenshot_dir, f"screenshot_{int(time.time() * 1000)}.png")
+        driver.save_screenshot(screenshot_path)
+        print(f"[ChromeDriver] Screenshot saved to: {screenshot_path}")
+        driver.quit()
     except Exception as e:
-        return {"url":url,"error":str(e),"data":""}
+        error = str(e)
+        print(f"[ChromeDriver] Error: {error}")
+    return {"url": url, "error": error, "data": data}
+
+
 def bfs_crawl_and_scan(starts, depth=2):
     visited = set()
     bfs_tree = {}
