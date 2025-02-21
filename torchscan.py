@@ -555,15 +555,26 @@ def extract_links_from_html(url,html_text):
 def scan_with_chromedriver(url):
     if not SELENIUM_AVAILABLE:
         return {"url":url,"error":"Selenium not available","data":""}
+    time.sleep(random.uniform(1.0,2.0))
+    o = Options()
+    o.add_argument("--headless=new")
+    o.binary_location = "chrome/Google Chrome for Testing.app"
+    s = ChromeService("chromedriver")
+    print("Launching Chrome with the following details:")
+    print(f"  Service: {s}")
+    print(f"  Binary: {o.binary_location}")
+    print(f"  Arguments: {o.arguments}")
     try:
-        time.sleep(random.uniform(1.0,2.0))
-        o = Options()
-        o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
-        s = ChromeService("chromedriver")
-        d = webdriver.Chrome(service=s,options=o)
-        d.get(url)
-        c = d.page_source
+        try:
+            d = webdriver.Chrome(service=s,options=o)
+        except Exception as e:
+            return {"url":url,"error":f"Chrome launch failed: {str(e)}","data":""}
+        try:
+            d.get(url)
+            c = d.page_source
+        except Exception as e:
+            d.quit()
+            return {"url":url,"error":f"Chrome navigation failed: {str(e)}","data":""}
         d.quit()
         return {"url":url,"error":"","data":c}
     except Exception as e:
