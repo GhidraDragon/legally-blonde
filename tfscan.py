@@ -29,6 +29,9 @@ try:
 except ImportError:
     SELENIUM_AVAILABLE = False
 
+# Added import to fix custom class serialization
+from keras.saving import register_keras_serializable
+
 print("[INFO] Loading constants and patterns...")
 XSS_MODEL_PATH = "xss_js_model.keras"
 SQLI_MODEL_PATH = "sql_injection_model.keras"
@@ -217,6 +220,7 @@ def vectorize(text, word2idx):
         indices.append(word2idx.get(w, 0))
     return indices
 
+@register_keras_serializable(package="Custom", name="EnhancedTFNet")
 class EnhancedTFNet(tf.keras.Model):
     def __init__(self, vocab_size=500, embed_dim=256, hidden_dim=256):
         super().__init__()
