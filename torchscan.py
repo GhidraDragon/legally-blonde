@@ -10,6 +10,7 @@ import urllib.parse
 import requests
 import concurrent.futures
 import sys
+import traceback
 from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
@@ -18,6 +19,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import gym
+
+import matplotlib.pyplot as plt
+import networkx as nx
 
 try:
     from selenium import webdriver
@@ -201,27 +205,31 @@ def vectorize(text, word2idx):
         indices.append(word2idx.get(w, 0))
     return indices
 
-class SimpleNet(nn.Module):
-    def __init__(self, vocab_size=500, embed_dim=50, hidden_dim=50):
-        super(SimpleNet, self).__init__()
+class EnhancedNet(nn.Module):
+    def __init__(self, vocab_size=500, embed_dim=256, hidden_dim=256):
+        super(EnhancedNet, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.fc1 = nn.Linear(embed_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.dropout = nn.Dropout(0.4)
+        self.fc3 = nn.Linear(hidden_dim, 1)
     def forward(self, x):
         embedded = self.embed(x)
         embedded = embedded.mean(dim=1)
-        h = torch.relu(self.fc1(embedded))
-        out = self.fc2(h).squeeze(1)
+        h1 = torch.relu(self.fc1(embedded))
+        d = self.dropout(h1)
+        h2 = torch.relu(self.fc2(d))
+        out = self.fc3(h2).squeeze(1)
         return out
 
 class TorchClassifier:
-    def __init__(self, vocab, word2idx, model_path, vocab_size=500, embed_dim=50, hidden_dim=50):
+    def __init__(self, vocab, word2idx, model_path, vocab_size=500, embed_dim=256, hidden_dim=256):
         self.vocab = vocab
         self.word2idx = word2idx
         self.vocab_size = vocab_size
         self.model_path = model_path
-        self.model = SimpleNet(vocab_size, embed_dim, hidden_dim)
-    def fit(self, X_data, y_data, epochs=5, lr=0.01, batch_size=2):
+        self.model = EnhancedNet(vocab_size, embed_dim, hidden_dim)
+    def fit(self, X_data, y_data, epochs=20, lr=0.001, batch_size=4):
         opt = optim.Adam(self.model.parameters(), lr=lr)
         loss_fn = nn.BCEWithLogitsLoss()
         data_pairs = list(zip(X_data, y_data))
@@ -259,9 +267,9 @@ def load_torch_model(path):
     if not os.path.isfile(path):
         return None
     ckpt = torch.load(path, map_location=torch.device('cpu'))
-    model = SimpleNet(len(ckpt["vocab"]))
+    model = EnhancedNet(len(ckpt["vocab"]),256,256)
     model.load_state_dict(ckpt["state_dict"])
-    classifier = TorchClassifier(ckpt["vocab"], ckpt["word2idx"], path, len(ckpt["vocab"]))
+    classifier = TorchClassifier(ckpt["vocab"], ckpt["word2idx"], path, len(ckpt["vocab"]),256,256)
     classifier.model = model
     return classifier
 
@@ -281,6 +289,7 @@ def train_base_ml_models():
         vocab, word2idx = build_vocab(all_text)
         clf = TorchClassifier(vocab, word2idx, XSS_MODEL_PATH, len(vocab))
         clf.fit(X_data, y_data)
+        clf.fit(X_data, y_data)
 
     if not os.path.isfile(SQLI_MODEL_PATH):
         sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
@@ -290,6 +299,7 @@ def train_base_ml_models():
         all_text = X_data
         vocab, word2idx = build_vocab(all_text)
         clf = TorchClassifier(vocab, word2idx, SQLI_MODEL_PATH, len(vocab))
+        clf.fit(X_data, y_data)
         clf.fit(X_data, y_data)
 
 def train_all_vulnerability_models():
@@ -303,6 +313,7 @@ def train_all_vulnerability_models():
             all_text = X_data
             vocab, word2idx = build_vocab(all_text)
             clf = TorchClassifier(vocab, word2idx, mp, len(vocab))
+            clf.fit(X_data, y_data)
             clf.fit(X_data, y_data)
 
 def normalize_and_decode(text):
@@ -560,25 +571,36 @@ def scan_with_chromedriver(url):
     o.add_argument("--headless=new")
     o.binary_location = "chrome/Google Chrome for Testing.app"
     s = ChromeService("chromedriver")
-    print("Launching Chrome with the following details:")
-    print(f"  Service: {s}")
-    print(f"  Binary: {o.binary_location}")
-    print(f"  Arguments: {o.arguments}")
     try:
         try:
             d = webdriver.Chrome(service=s,options=o)
         except Exception as e:
-            return {"url":url,"error":f"Chrome launch failed: {str(e)}","data":""}
+            tb = traceback.format_exc()
+            return {"url":url,"error":f"Chrome launch failed: {str(e)}\nTraceback: {tb}","data":""}
         try:
             d.get(url)
             c = d.page_source
         except Exception as e:
+            tb = traceback.format_exc()
             d.quit()
-            return {"url":url,"error":f"Chrome navigation failed: {str(e)}","data":""}
+            return {"url":url,"error":f"Chrome navigation failed: {str(e)}\nTraceback: {tb}","data":""}
         d.quit()
         return {"url":url,"error":"","data":c}
     except Exception as e:
-        return {"url":url,"error":str(e),"data":""}
+        tb = traceback.format_exc()
+        return {"url":url,"error":f"ChromeDriver error: {str(e)}\nTraceback: {tb}","data":""}
+
+def plot_current_graph(graph, depth):
+    G = nx.DiGraph()
+    for node, neighbors in graph.items():
+        for neigh in neighbors:
+            G.add_edge(node, neigh)
+    plt.figure(figsize=(10,6))
+    pos = nx.spring_layout(G, k=0.3)
+    nx.draw(G, pos, with_labels=True, node_size=400, font_size=8, arrows=True)
+    plt.title(f"BFS Layer {depth}")
+    plt.savefig(f"bfs_layer_{depth}.png")
+    plt.close()
 
 def bfs_crawl_and_scan(starts,max_depth=10):
     visited = set()
@@ -588,12 +610,17 @@ def bfs_crawl_and_scan(starts,max_depth=10):
     results = []
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+    graph = {}
+    current_depth = 0
     while q:
         d,u = heapq.heappop(q)
         if u in visited:
             continue
         if d>max_depth:
             break
+        if d>current_depth:
+            plot_current_graph(graph, current_depth)
+            current_depth = d
         visited.add(u)
         time.sleep(random.uniform(0.3,0.8))
         f1 = http_executor.submit(scan_target,u)
@@ -602,16 +629,18 @@ def bfs_crawl_and_scan(starts,max_depth=10):
         r2 = f2.result()
         body1 = r1["body"] if "body" in r1 else ""
         body2 = r2["data"] if "data" in r2 else ""
-        if "error" not in r1:
-            new_links = extract_links_from_html(u,body1)
-            for nl in new_links:
-                if nl not in visited:
-                    heapq.heappush(q,(d+1,nl))
-        if body2:
-            new_links2 = extract_links_from_html(u,body2)
-            for nl2 in new_links2:
-                if nl2 not in visited:
-                    heapq.heappush(q,(d+1,nl2))
+        new_links_1 = extract_links_from_html(u,body1)
+        new_links_2 = extract_links_from_html(u,body2)
+        if u not in graph:
+            graph[u] = set()
+        for nl in new_links_1:
+            graph[u].add(nl)
+            if nl not in visited:
+                heapq.heappush(q,(d+1,nl))
+        for nl2 in new_links_2:
+            graph[u].add(nl2)
+            if nl2 not in visited:
+                heapq.heappush(q,(d+1,nl2))
         combined_details = r1["matched_details"] if "matched_details" in r1 else []
         if r2["error"]:
             combined_details.append(label_entry("ChromeDriver Error","browser-based detection",r2["error"]))
@@ -630,6 +659,7 @@ def bfs_crawl_and_scan(starts,max_depth=10):
             "extracted_js_functions":combined_js
         }
         results.append(final)
+    plot_current_graph(graph, current_depth)
     http_executor.shutdown()
     bot_executor.shutdown()
     return results
@@ -656,19 +686,27 @@ class VulnerabilityScannerEnv(gym.Env):
                 reward += 100
         self.vulns_found += found
         self.current_step += 1
-        done = (self.current_step >= 3)
+        done = (self.current_step >= 5)
         return 0, reward, done, {}
     def render(self, mode="human"):
         pass
 
 def train_reinforcement_model(urls):
     env = VulnerabilityScannerEnv(urls)
-    obs = env.reset()
-    for _ in range(10):
-        action = random.randint(0, env.action_space.n - 1)
-        obs, reward, done, _ = env.step(action)
-        if done:
-            env.reset()
+    q_table = [0.0 for _ in range(env.action_space.n)]
+    alpha = 0.1
+    gamma = 0.9
+    epsilon = 0.2
+    for episode in range(500):
+        obs = env.reset()
+        done = False
+        while not done:
+            if random.random() < epsilon:
+                action = random.randrange(env.action_space.n)
+            else:
+                action = q_table.index(max(q_table))
+            next_obs, reward, done, _ = env.step(action)
+            q_table[action] += alpha * (reward + gamma * max(q_table) - q_table[action])
 
 def main():
     sys.stdout.reconfigure(line_buffering=True)

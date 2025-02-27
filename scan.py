@@ -10,6 +10,7 @@ import urllib.parse
 import requests
 import concurrent.futures
 import sys
+import traceback
 from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
@@ -39,11 +40,23 @@ ENABLE_FORM_PARSING = True
 CUSTOM_HEADERS = {"User-Agent":"ImprovedSecurityScanner/1.0"}
 
 XSS_REGEXES = [
-    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",r"<\s*img[^>]+onerror\s*=.*?>",r"<\s*svg[^>]*on(load|error)\s*=",
-    r"<\s*iframe\b.*?>",r"<\s*body\b[^>]*onload\s*=",r"javascript\s*:",r"<\s*\w+\s+on\w+\s*=",
-    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",r"&#x3c;\s*script\s*&#x3e;",r"<scr(?:.*?)ipt>",r"</scr(?:.*?)ipt>",
-    r"<\s*script[^>]*src\s*=.*?>",r"expression\s*\(",r"vbscript\s*:",r"mozbinding\s*:",
-    r"javascript:alert\(document.domain\)","<script src=['\"]http://[^>]*?>"
+    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",
+    r"<\s*img[^>]+onerror\s*=.*?>",
+    r"<\s*svg[^>]*on(load|error)\s*=",
+    r"<\s*iframe\b.*?>",
+    r"<\s*body\b[^>]*onload\s*=",
+    r"javascript\s*:",
+    r"<\s*\w+\s+on\w+\s*=",
+    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",
+    r"&#x3c;\s*script\s*&#x3e;",
+    r"<scr(?:.*?)ipt>",
+    r"</scr(?:.*?)ipt>",
+    r"<\s*script[^>]*src\s*=.*?>",
+    r"expression\s*\(",
+    r"vbscript\s*:",
+    r"mozbinding\s*:",
+    r"javascript:alert\(document.domain\)",
+    "<script src=['\"]http://[^>]*?>"
 ]
 
 VULN_PATTERNS = {
@@ -339,7 +352,15 @@ def analyze_query_params(url):
 
 def fuzz_injection_tests(url):
     fs = []
-    pl = ["' OR '1'='1","<script>alert(1)</script>","; ls;","&& cat /etc/passwd","<img src=x onerror=alert(2)>","'; DROP TABLE users; --","|| ping -c 4 127.0.0.1 ||"]
+    pl = [
+        "' OR '1'='1",
+        "<script>alert(1)</script>",
+        "; ls;",
+        "&& cat /etc/passwd",
+        "<img src=x onerror=alert(2)>",
+        "'; DROP TABLE users; --",
+        "|| ping -c 4 127.0.0.1 ||"
+    ]
     for p in pl:
         time.sleep(random.uniform(1.2,2.5))
         try:
@@ -505,7 +526,8 @@ def scan_with_chromedriver(url):
         d.quit()
         return {"url":url,"error":"","data":c}
     except Exception as e:
-        return {"url":url,"error":str(e),"data":""}
+        error_details = traceback.format_exc()
+        return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":""}
 
 def bfs_crawl_and_scan(starts,max_depth=10):
     visited = set()
