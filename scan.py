@@ -11,6 +11,8 @@ import requests
 import concurrent.futures
 import sys
 import traceback
+import matplotlib.pyplot as plt
+import networkx as nx
 from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
@@ -529,16 +531,23 @@ def scan_with_chromedriver(url):
         error_details = traceback.format_exc()
         return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":""}
 
-def bfs_crawl_and_scan(starts,max_depth=10):
+def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
     q = []
+    depth_map = {}
+    G = nx.DiGraph()
     for s in starts:
         heapq.heappush(q,(0,s))
+        depth_map[s] = 0
+        G.add_node(s,depth=0)
     results = []
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     while q:
         d,u = heapq.heappop(q)
+        print(f"PriorityBFS Depth: {d}")
+        print(f"Full URL: {u}")
+        print("Details: scanning target, scanning with chromedriver, extracting links.")
         if u in visited:
             continue
         if d>max_depth:
@@ -556,11 +565,17 @@ def bfs_crawl_and_scan(starts,max_depth=10):
             for nl in new_links:
                 if nl not in visited:
                     heapq.heappush(q,(d+1,nl))
+                    depth_map[nl] = d+1
+                    G.add_node(nl,depth=d+1)
+                    G.add_edge(u,nl)
         if body2:
             new_links2 = extract_links_from_html(u,body2)
             for nl2 in new_links2:
                 if nl2 not in visited:
                     heapq.heappush(q,(d+1,nl2))
+                    depth_map[nl2] = d+1
+                    G.add_node(nl2,depth=d+1)
+                    G.add_edge(u,nl2)
         combined_details = r1["matched_details"] if "matched_details" in r1 else []
         if r2["error"]:
             combined_details.append(label_entry("ChromeDriver Error","browser-based detection",r2["error"]))
@@ -581,13 +596,24 @@ def bfs_crawl_and_scan(starts,max_depth=10):
         results.append(final)
     http_executor.shutdown()
     bot_executor.shutdown()
+    max_d = max(depth_map.values()) if depth_map else 0
+    if max_d > max_depth:
+        max_d = max_depth
+    for layer in range(max_d+1):
+        layer_nodes = [n for n,data in G.nodes(data=True) if data.get('depth') == layer]
+        subG = G.subgraph(layer_nodes)
+        plt.figure(figsize=(8,6))
+        pos = nx.spring_layout(subG, seed=42)
+        nx.draw_networkx(subG, pos, with_labels=True)
+        plt.title(f"Layer {layer}")
+        plt.show()
     return results
 
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
     train_all_vulnerability_models()
-    all_results = bfs_crawl_and_scan(test_sites,10)
+    all_results = priority_bfs_crawl_and_scan(test_sites,20)
     for r in all_results:
         print(f"\nServer: {r.get('server','Unknown')} | {r['url']}")
         if "error" in r and r["error"]:

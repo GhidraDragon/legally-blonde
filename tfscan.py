@@ -15,9 +15,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
 
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import tensorflow as tf
 import gym
 
 import matplotlib.pyplot as plt
@@ -31,20 +29,33 @@ try:
 except ImportError:
     SELENIUM_AVAILABLE = False
 
-XSS_MODEL_PATH = "xss_js_model.pth"
-SQLI_MODEL_PATH = "sql_injection_model.pth"
-MULTI_MODELS_DIR = "ml_models_torch"
+print("[INFO] Loading constants and patterns...")
+XSS_MODEL_PATH = "xss_js_model.keras"
+SQLI_MODEL_PATH = "sql_injection_model.keras"
+MULTI_MODELS_DIR = "ml_models_tf"
 MAX_BODY_SNIPPET_LEN = 5000
 ENABLE_HEADER_SCANNING = True
 ENABLE_FORM_PARSING = True
 CUSTOM_HEADERS = {"User-Agent":"ImprovedSecurityScanner/1.0"}
 
 XSS_REGEXES = [
-    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",r"<\s*img[^>]+onerror\s*=.*?>",r"<\s*svg[^>]*on(load|error)\s*=",
-    r"<\s*iframe\b.*?>",r"<\s*body\b[^>]*onload\s*=",r"javascript\s*:",r"<\s*\w+\s+on\w+\s*=",
-    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",r"&#x3c;\s*script\s*&#x3e;",r"<scr(?:.*?)ipt>",r"</scr(?:.*?)ipt>",
-    r"<\s*script[^>]*src\s*=.*?>",r"expression\s*\(",r"vbscript\s*:",r"mozbinding\s*:",
-    r"javascript:alert\(document.domain\)","<script src=['\"]http://[^>]*?>"
+    r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",
+    r"<\s*img[^>]+onerror\s*=.*?>",
+    r"<\s*svg[^>]*on(load|error)\s*=",
+    r"<\s*iframe\b.*?>",
+    r"<\s*body\b[^>]*onload\s*=",
+    r"javascript\s*:",
+    r"<\s*\w+\s+on\w+\s*=",
+    r"<\s*s\s*c\s*r\s*i\s*p\s*t[^>]*>",
+    r"&#x3c;\s*script\s*&#x3e;",
+    r"<scr(?:.*?)ipt>",
+    r"</scr(?:.*?)ipt>",
+    r"<\s*script[^>]*src\s*=.*?>",
+    r"expression\s*\(",
+    r"vbscript\s*:",
+    r"mozbinding\s*:",
+    r"javascript:alert\(document.domain\)",
+    r"<script src=['\"]http://[^>]*?>"
 ]
 
 VULN_PATTERNS = {
@@ -140,6 +151,7 @@ def label_entry(label,tactic,snippet,confidence=1.0):
     e = VULN_EXPLANATIONS.get(label,"No explanation")
     return (label,tactic,snippet,e,confidence)
 
+print("[INFO] Preparing multi-vulnerability training samples...")
 MULTI_VULN_SAMPLES = {
     "SQL Error":(["syntax error near 'FROM'","ODBC SQL server driver failed","error in your SQL syntax"],["normal query","sql logging enabled"]),
     "SQL Injection":(["UNION SELECT pass FROM users","' OR '1'='1","xp_cmdshell"],["SELECT id, name FROM product","UPDATE user set pass=?"]),
@@ -205,71 +217,84 @@ def vectorize(text, word2idx):
         indices.append(word2idx.get(w, 0))
     return indices
 
-class EnhancedNet(nn.Module):
+class EnhancedTFNet(tf.keras.Model):
     def __init__(self, vocab_size=500, embed_dim=256, hidden_dim=256):
-        super(EnhancedNet, self).__init__()
-        self.embed = nn.Embedding(vocab_size, embed_dim)
-        self.fc1 = nn.Linear(embed_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.dropout = nn.Dropout(0.4)
-        self.fc3 = nn.Linear(hidden_dim, 1)
-    def forward(self, x):
-        embedded = self.embed(x)
-        embedded = embedded.mean(dim=1)
-        h1 = torch.relu(self.fc1(embedded))
+        super().__init__()
+        self.embed = tf.keras.layers.Embedding(vocab_size, embed_dim)
+        self.fc1 = tf.keras.layers.Dense(hidden_dim)
+        self.fc2 = tf.keras.layers.Dense(hidden_dim)
+        self.dropout = tf.keras.layers.Dropout(0.4)
+        self.fc3 = tf.keras.layers.Dense(1)
+    def call(self, x):
+        x_embed = self.embed(x)
+        x_mean = tf.reduce_mean(x_embed, axis=1)
+        h1 = tf.nn.relu(self.fc1(x_mean))
         d = self.dropout(h1)
-        h2 = torch.relu(self.fc2(d))
-        out = self.fc3(h2).squeeze(1)
+        h2 = tf.nn.relu(self.fc2(d))
+        out = self.fc3(h2)
         return out
 
-class TorchClassifier:
+class TFClassifier:
     def __init__(self, vocab, word2idx, model_path, vocab_size=500, embed_dim=256, hidden_dim=256):
         self.vocab = vocab
         self.word2idx = word2idx
         self.vocab_size = vocab_size
         self.model_path = model_path
-        self.model = EnhancedNet(vocab_size, embed_dim, hidden_dim)
+        self.model = EnhancedTFNet(vocab_size, embed_dim, hidden_dim)
+        self.model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
+            loss=tf.keras.losses.BinaryCrossentropy(from_logits=True)
+        )
     def fit(self, X_data, y_data, epochs=20, lr=0.001, batch_size=4):
-        opt = optim.Adam(self.model.parameters(), lr=lr)
-        loss_fn = nn.BCEWithLogitsLoss()
+        self.model.optimizer.lr = lr
         data_pairs = list(zip(X_data, y_data))
         for _ in range(epochs):
             random.shuffle(data_pairs)
             for i in range(0, len(data_pairs), batch_size):
                 batch = data_pairs[i:i+batch_size]
-                bx = [torch.tensor(vectorize(x, self.word2idx)) for x,_ in batch]
-                by = [torch.tensor(y, dtype=torch.float32) for _,y in batch]
+                bx = [vectorize(x, self.word2idx) for x,_ in batch]
+                by = [float(y) for _,y in batch]
                 lens = [len(xx) for xx in bx]
                 max_len = max(lens) if lens else 1
-                padded = [torch.cat([xx, torch.zeros(max_len-len(xx), dtype=torch.long)]) for xx in bx]
-                padded = torch.stack(padded, dim=0)
-                self.model.zero_grad()
-                preds = self.model(padded)
-                loss = loss_fn(preds, torch.stack(by))
-                loss.backward()
-                opt.step()
-        torch.save({
-            "vocab": self.vocab,
-            "word2idx": self.word2idx,
-            "state_dict": self.model.state_dict()
-        }, self.model_path)
+                padded = []
+                for xx in bx:
+                    padded.append(xx + [0]*(max_len - len(xx)))
+                padded = tf.convert_to_tensor(padded, dtype=tf.int32)
+                by = tf.convert_to_tensor(by, dtype=tf.float32)
+                with tf.GradientTape() as tape:
+                    logits = self.model(padded, training=True)
+                    loss_value = tf.nn.sigmoid_cross_entropy_with_logits(
+                        labels=by,
+                        logits=tf.squeeze(logits, axis=-1)
+                    )
+                    loss_value = tf.reduce_mean(loss_value)
+                grads = tape.gradient(loss_value, self.model.trainable_variables)
+                self.model.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        save_data = {"vocab": self.vocab,"word2idx": self.word2idx}
+        base = os.path.splitext(self.model_path)[0]
+        with open(base + "_vocab.json","w",encoding="utf-8") as f:
+            json.dump(save_data, f)
+        self.model.save(self.model_path)
     def predict_proba(self, text):
-        data_idx = torch.tensor(vectorize(text, self.word2idx))
+        data_idx = vectorize(text, self.word2idx)
         if len(data_idx)==0:
-            data_idx = torch.tensor([0])
-        data_idx = data_idx.unsqueeze(0)
-        with torch.no_grad():
-            logits = self.model(data_idx)
-            prob = torch.sigmoid(logits).item()
+            data_idx = [0]
+        padded = tf.convert_to_tensor([data_idx], dtype=tf.int32)
+        logits = self.model(padded, training=False)
+        prob = tf.sigmoid(logits)[0][0].numpy()
         return prob
 
-def load_torch_model(path):
-    if not os.path.isfile(path):
+def load_tf_model(path):
+    base = os.path.splitext(path)[0]
+    vocab_file = base + "_vocab.json"
+    if not os.path.isfile(path) or not os.path.isfile(vocab_file):
         return None
-    ckpt = torch.load(path, map_location=torch.device('cpu'))
-    model = EnhancedNet(len(ckpt["vocab"]),256,256)
-    model.load_state_dict(ckpt["state_dict"])
-    classifier = TorchClassifier(ckpt["vocab"], ckpt["word2idx"], path, len(ckpt["vocab"]),256,256)
+    with open(vocab_file,"r",encoding="utf-8") as f:
+        ckpt = json.load(f)
+    vocab = ckpt["vocab"]
+    word2idx = ckpt["word2idx"]
+    model = tf.keras.models.load_model(path)
+    classifier = TFClassifier(vocab, word2idx, path, len(vocab))
     classifier.model = model
     return classifier
 
@@ -280,40 +305,61 @@ def ml_detection_confidence(snippet, model):
     return (prob, prob >= 0.5)
 
 def train_base_ml_models():
+    print("[INFO] Checking or training base ML models (XSS / SQL Injection)...")
     if not os.path.isfile(XSS_MODEL_PATH):
-        sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
-        ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
+        sus_js = [
+            "<script>alert('Hacked!')</script>",
+            "javascript:alert('XSS')",
+            "onerror=alert(document.cookie)",
+            "<img src=x onerror=alert(1)>",
+            "<svg onload=alert('svgxss')>",
+            "<script src='http://evil.com/x.js'></script>"
+        ]
+        ben_js = [
+            "function greetUser(name) {}",
+            "var x=5; if(x>2){x++;}",
+            "document.getElementById('x').innerText='Safe';",
+            "function normalFunc(){}"
+        ]
         X_data = sus_js + ben_js
         y_data = [1]*len(sus_js) + [0]*len(ben_js)
-        all_text = X_data
-        vocab, word2idx = build_vocab(all_text)
-        clf = TorchClassifier(vocab, word2idx, XSS_MODEL_PATH, len(vocab))
-        clf.fit(X_data, y_data)
+        vocab, word2idx = build_vocab(X_data)
+        clf = TFClassifier(vocab, word2idx, XSS_MODEL_PATH, len(vocab))
         clf.fit(X_data, y_data)
 
     if not os.path.isfile(SQLI_MODEL_PATH):
-        sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
-        ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
+        sus_sql = [
+            "' OR '1'='1",
+            "UNION SELECT username, password FROM users",
+            "' OR 'a'='a",
+            "SELECT * FROM table WHERE id='",
+            "' DROP TABLE users --",
+            "xp_cmdshell",
+            "OR 1=1 LIMIT 1"
+        ]
+        ben_sql = [
+            "SELECT id, name FROM products",
+            "INSERT INTO users VALUES ('test','pass')",
+            "UPDATE accounts SET balance=500 WHERE userid=1",
+            "CREATE TABLE logs (entry TEXT)"
+        ]
         X_data = sus_sql + ben_sql
         y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
-        all_text = X_data
-        vocab, word2idx = build_vocab(all_text)
-        clf = TorchClassifier(vocab, word2idx, SQLI_MODEL_PATH, len(vocab))
-        clf.fit(X_data, y_data)
+        vocab, word2idx = build_vocab(X_data)
+        clf = TFClassifier(vocab, word2idx, SQLI_MODEL_PATH, len(vocab))
         clf.fit(X_data, y_data)
 
 def train_all_vulnerability_models():
+    print("[INFO] Checking or training multi vulnerability models...")
     if not os.path.isdir(MULTI_MODELS_DIR):
         os.makedirs(MULTI_MODELS_DIR)
     for vuln_name,(suspicious,benign) in MULTI_VULN_SAMPLES.items():
-        mp = os.path.join(MULTI_MODELS_DIR,f"{vuln_name.replace(' ','_').replace(':','').replace('/','_')}.pth")
+        mp = os.path.join(MULTI_MODELS_DIR,f"{vuln_name.replace(' ','_').replace(':','').replace('/','_')}.keras")
         if not os.path.isfile(mp):
             X_data = suspicious + benign
             y_data = [1]*len(suspicious) + [0]*len(benign)
-            all_text = X_data
-            vocab, word2idx = build_vocab(all_text)
-            clf = TorchClassifier(vocab, word2idx, mp, len(vocab))
-            clf.fit(X_data, y_data)
+            vocab, word2idx = build_vocab(X_data)
+            clf = TFClassifier(vocab, word2idx, mp, len(vocab))
             clf.fit(X_data, y_data)
 
 def normalize_and_decode(text):
@@ -413,27 +459,45 @@ def analyze_query_params(url):
 
 def fuzz_injection_tests(url):
     fs = []
-    pl = ["' OR '1'='1","<script>alert(1)</script>","; ls;","&& cat /etc/passwd","<img src=x onerror=alert(2)>","'; DROP TABLE users; --","|| ping -c 4 127.0.0.1 ||"]
-    for p in pl:
-        time.sleep(random.uniform(1.2,2.5))
+    pl = [
+        "' OR '1'='1",
+        "<script>alert(1)</script>",
+        "; ls;",
+        "&& cat /etc/passwd",
+        "<img src=x onerror=alert(2)>",
+        "'; DROP TABLE users; --",
+        "|| ping -c 4 127.0.0.1 ||"
+    ]
+    def do_request(payload):
         try:
-            tu = f"{url}?inj={urllib.parse.quote(p)}"
+            tu = f"{url}?inj={urllib.parse.quote(payload)}"
             r = requests.get(tu,timeout=3,headers=CUSTOM_HEADERS)
-            fs.extend(scan_for_vuln_patterns(r.text))
+            return scan_for_vuln_patterns(r.text)
         except:
-            pass
+            return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pl)) as executor:
+        future_to_payload = {executor.submit(do_request, p): p for p in pl}
+        for fut in concurrent.futures.as_completed(future_to_payload):
+            try:
+                fs.extend(fut.result())
+            except:
+                pass
     return fs
 
 def repeated_disruption_test(url,attempts=3):
     f = []
-    for _ in range(attempts):
-        time.sleep(random.uniform(1.0,2.0))
+    def do_test(_):
         try:
             r = requests.get(url,timeout=3,headers=CUSTOM_HEADERS)
             if r.status_code>=500:
-                f.append(label_entry("Service Disruption","frequent-request detection",str(r.status_code)))
+                return [label_entry("Service Disruption","frequent-request detection",str(r.status_code))]
         except:
-            f.append(label_entry("Service Disruption","frequent-request detection","Exception"))
+            return [label_entry("Service Disruption","frequent-request detection","Exception")]
+        return []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=attempts) as executor:
+        futures = [executor.submit(do_test, i) for i in range(attempts)]
+        for fut in concurrent.futures.as_completed(futures):
+            f.extend(fut.result())
     return f
 
 def extract_js_functions(ht):
@@ -447,11 +511,11 @@ def extract_js_functions(ht):
     return d
 
 def scan_target(url):
+    print(f"[INFO] Scanning target: {url}")
     ds = analyze_query_params(url)
     ds.extend(fuzz_injection_tests(url))
     ds.extend(repeated_disruption_test(url))
     try:
-        time.sleep(random.uniform(1.5,3.0))
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
         p_tags = scan_for_vuln_patterns(b)
@@ -459,8 +523,8 @@ def scan_target(url):
         f_tags = parse_suspicious_forms(b) if ENABLE_FORM_PARSING else []
         d_tags = dom_based_xss_detection(b)
         ml_tags = []
-        xm = load_torch_model(XSS_MODEL_PATH)
-        sm = load_torch_model(SQLI_MODEL_PATH)
+        xm = load_tf_model(XSS_MODEL_PATH)
+        sm = load_tf_model(SQLI_MODEL_PATH)
         if xm:
             scr_pat = re.compile(r"<script\b.*?>(.*?)</script>",re.IGNORECASE|re.DOTALL)
             for s_ in scr_pat.findall(b):
@@ -475,8 +539,8 @@ def scan_target(url):
                 sn = b[:200]+"..." if len(b)>200 else b
                 ml_tags.append(label_entry("SQL Injection",f"ML-based detection (score={prob:.3f})",sn,prob))
         for vn in MULTI_VULN_SAMPLES.keys():
-            mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.pth")
-            mm = load_torch_model(mp)
+            mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.keras")
+            mm = load_tf_model(mp)
             if mm:
                 prob,pred = ml_detection_confidence(b,mm)
                 if pred:
@@ -504,16 +568,19 @@ def scan_target(url):
         }
 
 def write_scan_results_text(rs,filename="scan_results.txt"):
+    print("[INFO] Writing text results...")
     with open(filename,"w",encoding="utf-8") as f:
         for r in rs:
             f.write(f"Server causing detection: {r.get('server','Unknown')}\n")
             f.write(f"URL: {r['url']}\n")
+            if "bfs_depth" in r:
+                f.write(f"  PriorityBFS Depth: {r['bfs_depth']}\n")
             if "error" in r:
                 f.write(f"  Error: {r['error']}\n")
                 for pt,tac,snip,ex,conf in r["matched_details"]:
                     f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
             else:
-                f.write(f"  Status: {r['status_code']} {r['reason']}\n")
+                f.write(f"  Status: {r.get('status_code','N/A')} {r.get('reason','')}\n")
                 if r["matched_details"]:
                     for pt,tac,snip,ex,conf in r["matched_details"]:
                         f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
@@ -524,6 +591,7 @@ def write_scan_results_text(rs,filename="scan_results.txt"):
             f.write("\n")
 
 def write_scan_results_json(rs):
+    print("[INFO] Writing JSON results...")
     ts = time.strftime("%Y%m%d_%H%M%S")
     d = f"results_{ts}"
     try:
@@ -543,6 +611,8 @@ def write_scan_results_json(rs):
         }
         if "status_code" in r:
             i["status"] = f"{r.get('status_code','N/A')} {r.get('reason','')}"
+        if "bfs_depth" in r:
+            i["priority_bfs_depth"] = r["bfs_depth"]
         for pt,tac,snip,ex,conf in r["matched_details"]:
             i["detections"].append({
                 "type":pt,"tactic":tac,"explanation":ex,"snippet":snip,"confidence":round(conf,3)
@@ -566,7 +636,6 @@ def extract_links_from_html(url,html_text):
 def scan_with_chromedriver(url):
     if not SELENIUM_AVAILABLE:
         return {"url":url,"error":"Selenium not available","data":""}
-    time.sleep(random.uniform(1.0,2.0))
     o = Options()
     o.add_argument("--headless=new")
     o.binary_location = "chrome/Google Chrome for Testing.app"
@@ -602,45 +671,58 @@ def plot_current_graph(graph, depth):
     plt.savefig(f"bfs_layer_{depth}.png")
     plt.close()
 
-def bfs_crawl_and_scan(starts,max_depth=10):
+captured_flags = []
+
+def detect_flags(content):
+    hits = []
+    patterns = [
+        re.compile(r"ctf\{[^}]+\}", re.IGNORECASE),
+        re.compile(r"flag\{[^}]+\}", re.IGNORECASE),
+        re.compile(r"capturetheflag", re.IGNORECASE),
+        re.compile(r"htb\{[^}]+\}", re.IGNORECASE),
+        re.compile(r"picoctf\{[^}]+\}", re.IGNORECASE)
+    ]
+    for pat in patterns:
+        for m in pat.finditer(content):
+            hits.append(m.group())
+    return hits
+
+def priority_bfs_crawl_and_scan(starts, max_depth=10):
+    print("[INFO] Starting Priority BFS crawl and scan...")
     visited = set()
-    q = []
-    for s in starts:
-        heapq.heappush(q,(0,s))
+    graph = {}
     results = []
+    pq = []
+    for s in starts:
+        heapq.heappush(pq, (0, s))
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-    graph = {}
-    current_depth = 0
-    while q:
-        d,u = heapq.heappop(q)
-        if u in visited:
-            continue
-        if d>max_depth:
+    while pq:
+        depth, url = heapq.heappop(pq)
+        if depth > max_depth:
             break
-        if d>current_depth:
-            plot_current_graph(graph, current_depth)
-            current_depth = d
-        visited.add(u)
-        time.sleep(random.uniform(0.3,0.8))
-        f1 = http_executor.submit(scan_target,u)
-        f2 = bot_executor.submit(scan_with_chromedriver,u)
+        if url in visited:
+            continue
+        visited.add(url)
+        print(f"[PRIORITY BFS] Processing: {url} at depth {depth}")
+        f1 = http_executor.submit(scan_target, url)
+        f2 = bot_executor.submit(scan_with_chromedriver, url)
         r1 = f1.result()
         r2 = f2.result()
         body1 = r1["body"] if "body" in r1 else ""
         body2 = r2["data"] if "data" in r2 else ""
-        new_links_1 = extract_links_from_html(u,body1)
-        new_links_2 = extract_links_from_html(u,body2)
-        if u not in graph:
-            graph[u] = set()
+        new_links_1 = extract_links_from_html(url, body1)
+        new_links_2 = extract_links_from_html(url, body2)
+        if url not in graph:
+            graph[url] = set()
         for nl in new_links_1:
-            graph[u].add(nl)
             if nl not in visited:
-                heapq.heappush(q,(d+1,nl))
-        for nl2 in new_links_2:
-            graph[u].add(nl2)
-            if nl2 not in visited:
-                heapq.heappush(q,(d+1,nl2))
+                graph[url].add(nl)
+                heapq.heappush(pq, (depth+1, nl))
+        for nl in new_links_2:
+            if nl not in visited:
+                graph[url].add(nl)
+                heapq.heappush(pq, (depth+1, nl))
         combined_details = r1["matched_details"] if "matched_details" in r1 else []
         if r2["error"]:
             combined_details.append(label_entry("ChromeDriver Error","browser-based detection",r2["error"]))
@@ -650,17 +732,26 @@ def bfs_crawl_and_scan(starts,max_depth=10):
         if body2:
             combined_js.extend(extract_js_functions(body2))
         final = {
-            "url":u,
+            "url":url,
             "server":r1.get("server","Unknown"),
             "status_code":r1.get("status_code","N/A"),
             "reason":r1.get("reason","N/A"),
             "error":r1.get("error","") or r2.get("error",""),
             "matched_details":combined_details,
             "extracted_js_functions":combined_js,
-            "priorityBFS_depth":d
+            "bfs_depth":depth
         }
+        flag_matches_1 = detect_flags(body1)
+        for fm in flag_matches_1:
+            print(f"[FLAG] Found potential flag: {fm} in {url}")
+            captured_flags.append({"flag":fm,"url":url})
+        flag_matches_2 = detect_flags(body2)
+        for fm in flag_matches_2:
+            print(f"[FLAG] Found potential flag: {fm} in {url}")
+            captured_flags.append({"flag":fm,"url":url})
         results.append(final)
-    plot_current_graph(graph, current_depth)
+        print(f"[PRIORITY BFS] Finished: {url} at depth {depth}")
+        plot_current_graph(graph, depth)
     http_executor.shutdown()
     bot_executor.shutdown()
     return results
@@ -693,6 +784,7 @@ class VulnerabilityScannerEnv(gym.Env):
         pass
 
 def train_reinforcement_model(urls):
+    print("[INFO] Training simple reinforcement model...")
     env = VulnerabilityScannerEnv(urls)
     q_table = [0.0 for _ in range(env.action_space.n)]
     alpha = 0.1
@@ -711,12 +803,17 @@ def train_reinforcement_model(urls):
 
 def main():
     sys.stdout.reconfigure(line_buffering=True)
+    print("[INFO] Starting main function...")
     train_base_ml_models()
+    print("[INFO] Base ML models ready.")
     train_all_vulnerability_models()
+    print("[INFO] All vulnerability models ready.")
     train_reinforcement_model(test_sites)
-    all_results = bfs_crawl_and_scan(test_sites,10)
+    print("[INFO] Reinforcement model trained.")
+    all_results = priority_bfs_crawl_and_scan(test_sites,10)
+    print("[INFO] Priority BFS crawl and scan completed.")
     for r in all_results:
-        print(f"\nDepth: {r.get('priorityBFS_depth','N/A')} - URL: {r['url']}")
+        print(f"\nServer: {r.get('server','Unknown')} | {r['url']} | PriorityBFS Depth: {r.get('bfs_depth','N/A')}")
         if "error" in r and r["error"]:
             print(f"  Error: {r['error']}")
         for pt,tactic,snippet,explanation,conf in r["matched_details"]:
@@ -727,6 +824,11 @@ def main():
                 print(f"    {f_}")
     write_scan_results_text(all_results,"scan_results.txt")
     write_scan_results_json(all_results)
+    if captured_flags:
+        print("[INFO] Writing successful_captures.json for discovered flags...")
+        with open("successful_captures.json","w",encoding="utf-8") as f:
+            json.dump(captured_flags,f,indent=2)
+    print("[INFO] Scan results have been written to disk.")
 
 if __name__=="__main__":
     main()
