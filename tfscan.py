@@ -510,42 +510,55 @@ def extract_js_functions(ht):
             d.append(mm.strip())
     return d
 
+global_xss_model = None
+global_sqli_model = None
+global_multi_models = {}
+
 def scan_target(url):
     print(f"[INFO] Scanning target: {url}")
+    print(f"[DETAIL] Detailed scanning of: {url}")
     ds = analyze_query_params(url)
     ds.extend(fuzz_injection_tests(url))
     ds.extend(repeated_disruption_test(url))
     try:
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
-        p_tags = scan_for_vuln_patterns(b)
-        h_tags = scan_response_headers(r.headers) if ENABLE_HEADER_SCANNING else []
-        f_tags = parse_suspicious_forms(b) if ENABLE_FORM_PARSING else []
-        d_tags = dom_based_xss_detection(b)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as exe:
+            future_p_tags = exe.submit(scan_for_vuln_patterns, b)
+            future_h_tags = exe.submit(scan_response_headers, r.headers if ENABLE_HEADER_SCANNING else None)
+            future_f_tags = exe.submit(parse_suspicious_forms, b) if ENABLE_FORM_PARSING else None
+            future_d_tags = exe.submit(dom_based_xss_detection, b)
+            p_tags = future_p_tags.result()
+            h_tags = future_h_tags.result() if future_h_tags else []
+            f_tags = future_f_tags.result() if future_f_tags else []
+            d_tags = future_d_tags.result() if future_d_tags else []
         ml_tags = []
-        xm = load_tf_model(XSS_MODEL_PATH)
-        sm = load_tf_model(SQLI_MODEL_PATH)
-        if xm:
-            scr_pat = re.compile(r"<script\b.*?>(.*?)</script>",re.IGNORECASE|re.DOTALL)
-            for s_ in scr_pat.findall(b):
-                prob,pred = ml_detection_confidence(s_,xm)
+        sc_pattern = re.compile(r"<script\b.*?>(.*?)</script>",re.IGNORECASE|re.DOTALL)
+        def check_each_model(snippet):
+            m_results = []
+            if global_xss_model:
+                prob,pred = ml_detection_confidence(snippet,global_xss_model)
                 if pred:
-                    sn = s_.strip()
+                    sn = snippet.strip()
                     if len(sn)>200: sn = sn[:200]+"..."
-                    ml_tags.append(label_entry("XSS",f"ML-based detection (score={prob:.3f})",sn,prob))
-        if sm:
-            prob,pred = ml_detection_confidence(b,sm)
-            if pred:
-                sn = b[:200]+"..." if len(b)>200 else b
-                ml_tags.append(label_entry("SQL Injection",f"ML-based detection (score={prob:.3f})",sn,prob))
-        for vn in MULTI_VULN_SAMPLES.keys():
-            mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.keras")
-            mm = load_tf_model(mp)
-            if mm:
-                prob,pred = ml_detection_confidence(b,mm)
+                    m_results.append(label_entry("XSS",f"ML-based detection (score={prob:.3f})",sn,prob))
+            if global_sqli_model:
+                prob,pred = ml_detection_confidence(snippet,global_sqli_model)
                 if pred:
-                    sn = b[:200]+"..." if len(b)>200 else b
-                    ml_tags.append(label_entry(vn,f"ML-based detection (score={prob:.3f})",sn,prob))
+                    sn = snippet[:200]+"..." if len(sn)>200 else snippet
+                    m_results.append(label_entry("SQL Injection",f"ML-based detection (score={prob:.3f})",sn,prob))
+            for vn,mm in global_multi_models.items():
+                prob,pred = ml_detection_confidence(snippet,mm)
+                if pred:
+                    sn = snippet[:200]+"..." if len(sn)>200 else snippet
+                    m_results.append(label_entry(vn,f"ML-based detection (score={prob:.3f})",sn,prob))
+            return m_results
+        all_snippets = [b]
+        all_snippets.extend(sc_pattern.findall(b))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(all_snippets)) as exe:
+            futs = [exe.submit(check_each_model, s_) for s_ in all_snippets]
+            for f_ in concurrent.futures.as_completed(futs):
+                ml_tags.extend(f_.result())
         all_tags = ds + p_tags + h_tags + f_tags + d_tags + ml_tags
         funcs = extract_js_functions(r.text)
         return {
@@ -808,6 +821,12 @@ def main():
     print("[INFO] Base ML models ready.")
     train_all_vulnerability_models()
     print("[INFO] All vulnerability models ready.")
+    global global_xss_model, global_sqli_model, global_multi_models
+    global_xss_model = load_tf_model(XSS_MODEL_PATH)
+    global_sqli_model = load_tf_model(SQLI_MODEL_PATH)
+    for vn in MULTI_VULN_SAMPLES.keys():
+        mp = os.path.join(MULTI_MODELS_DIR,f"{vn.replace(' ','_').replace(':','').replace('/','_')}.keras")
+        global_multi_models[vn] = load_tf_model(mp)
     train_reinforcement_model(test_sites)
     print("[INFO] Reinforcement model trained.")
     all_results = priority_bfs_crawl_and_scan(test_sites,10)

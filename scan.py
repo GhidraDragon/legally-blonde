@@ -352,26 +352,51 @@ def analyze_query_params(url):
                 f.append(label_entry("Suspicious param value in","query-param detection",f"{p}={v}"))
     return f
 
-def fuzz_injection_tests(url):
-    fs = []
-    pl = [
-        "' OR '1'='1",
-        "<script>alert(1)</script>",
-        "; ls;",
-        "&& cat /etc/passwd",
-        "<img src=x onerror=alert(2)>",
-        "'; DROP TABLE users; --",
-        "|| ping -c 4 127.0.0.1 ||"
-    ]
-    for p in pl:
-        time.sleep(random.uniform(1.2,2.5))
-        try:
+class RLAgent:
+    def __init__(self):
+        self.payloads = [
+            "' OR '1'='1",
+            "<script>alert(1)</script>",
+            "; ls;",
+            "&& cat /etc/passwd",
+            "<img src=x onerror=alert(2)>",
+            "'; DROP TABLE users; --",
+            "|| ping -c 4 127.0.0.1 ||"
+        ]
+        self.q_table = {p:0.0 for p in self.payloads}
+        self.alpha = 0.5
+        self.gamma = 0.9
+        self.num_steps = 7
+    def select_action(self):
+        if random.random() < 0.3:
+            return random.choice(self.payloads)
+        return max(self.payloads, key=lambda x: self.q_table[x])
+    def update(self,action,reward):
+        current_q = self.q_table[action]
+        best_next = max(self.q_table.values())
+        td_target = reward + self.gamma*best_next
+        self.q_table[action] = current_q + self.alpha*(td_target-current_q)
+
+def fuzz_injection_tests(url, agent):
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
+        future_map = {}
+        for _ in range(agent.num_steps):
+            p = agent.select_action()
             tu = f"{url}?inj={urllib.parse.quote(p)}"
-            r = requests.get(tu,timeout=3,headers=CUSTOM_HEADERS)
-            fs.extend(scan_for_vuln_patterns(r.text))
-        except:
-            pass
-    return fs
+            fut = ex.submit(requests.get,tu,timeout=3,headers=CUSTOM_HEADERS)
+            future_map[fut] = p
+        for fut in concurrent.futures.as_completed(future_map):
+            p = future_map[fut]
+            try:
+                r = fut.result()
+                fs = scan_for_vuln_patterns(r.text)
+                reward = 1.0 if fs else 0.0
+                agent.update(p,reward)
+                results.extend(fs)
+            except:
+                pass
+    return results
 
 def repeated_disruption_test(url,attempts=3):
     f = []
@@ -395,9 +420,9 @@ def extract_js_functions(ht):
             d.append(mm.strip())
     return d
 
-def scan_target(url):
+def scan_target(url, agent):
     ds = analyze_query_params(url)
-    ds.extend(fuzz_injection_tests(url))
+    ds.extend(fuzz_injection_tests(url,agent))
     ds.extend(repeated_disruption_test(url))
     try:
         time.sleep(random.uniform(1.5,3.0))
@@ -543,18 +568,16 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
     results = []
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+    agent = RLAgent()
     while q:
         d,u = heapq.heappop(q)
-        print(f"PriorityBFS Depth: {d}")
-        print(f"Full URL: {u}")
-        print("Details: scanning target, scanning with chromedriver, extracting links.")
         if u in visited:
             continue
         if d>max_depth:
             break
         visited.add(u)
         time.sleep(random.uniform(0.3,0.8))
-        f1 = http_executor.submit(scan_target,u)
+        f1 = http_executor.submit(scan_target,u,agent)
         f2 = bot_executor.submit(scan_with_chromedriver,u)
         r1 = f1.result()
         r2 = f2.result()
