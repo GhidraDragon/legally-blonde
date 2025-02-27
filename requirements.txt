@@ -7,3 +7,9 @@ webdriver_manager
 pillow
 requests
 matplotlib
+gym
+pytorch
+torchvision
+torchaudio
+datasets
+transformers
