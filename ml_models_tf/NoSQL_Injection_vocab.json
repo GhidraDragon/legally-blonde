@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "db", "users", "find", "where", "normal", "nosql"], "word2idx": {"<unk>": 0, "db": 1, "users": 2, "find": 3, "where": 4, "normal": 5, "nosql": 6}}

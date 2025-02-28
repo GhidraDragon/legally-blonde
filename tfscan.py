@@ -29,7 +29,6 @@ try:
 except ImportError:
     SELENIUM_AVAILABLE = False
 
-# Added import to fix custom class serialization
 from keras.saving import register_keras_serializable
 
 print("[INFO] Loading constants and patterns...")
@@ -222,8 +221,11 @@ def vectorize(text, word2idx):
 
 @register_keras_serializable(package="Custom", name="EnhancedTFNet")
 class EnhancedTFNet(tf.keras.Model):
-    def __init__(self, vocab_size=500, embed_dim=256, hidden_dim=256):
-        super().__init__()
+    def __init__(self, vocab_size=500, embed_dim=256, hidden_dim=256, **kwargs):
+        super().__init__(**kwargs)
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
         self.embed = tf.keras.layers.Embedding(vocab_size, embed_dim)
         self.fc1 = tf.keras.layers.Dense(hidden_dim)
         self.fc2 = tf.keras.layers.Dense(hidden_dim)
@@ -237,6 +239,17 @@ class EnhancedTFNet(tf.keras.Model):
         h2 = tf.nn.relu(self.fc2(d))
         out = self.fc3(h2)
         return out
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "vocab_size": self.vocab_size,
+            "embed_dim": self.embed_dim,
+            "hidden_dim": self.hidden_dim
+        })
+        return config
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
 class TFClassifier:
     def __init__(self, vocab, word2idx, model_path, vocab_size=500, embed_dim=256, hidden_dim=256):

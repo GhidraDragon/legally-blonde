@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "doctype", "foo", "entity", "normal", "xml"], "word2idx": {"<unk>": 0, "doctype": 1, "foo": 2, "entity": 3, "normal": 4, "xml": 5}}

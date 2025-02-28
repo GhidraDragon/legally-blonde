@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "transfer", "encoding", "chunked", "content", "length", "100", "normal", "headers"], "word2idx": {"<unk>": 0, "transfer": 1, "encoding": 2, "chunked": 3, "content": 4, "length": 5, "100": 6, "normal": 7, "headers": 8}}

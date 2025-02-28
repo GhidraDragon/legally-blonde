@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "http", "https", "redirect", "internal"], "word2idx": {"<unk>": 0, "http": 1, "https": 2, "redirect": 3, "internal": 4}}

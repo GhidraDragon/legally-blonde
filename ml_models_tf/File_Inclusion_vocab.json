@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "require", "http", "evil", "com", "include", "hack", "site", "normal", "safe", "block"], "word2idx": {"<unk>": 0, "require": 1, "http": 2, "evil": 3, "com": 4, "include": 5, "hack": 6, "site": 7, "normal": 8, "safe": 9, "block": 10}}

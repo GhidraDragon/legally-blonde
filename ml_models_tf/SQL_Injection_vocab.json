@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "select", "pass", "from", "1", "union", "users", "or", "xp_cmdshell", "id", "name", "product", "update", "user", "set"], "word2idx": {"<unk>": 0, "select": 1, "pass": 2, "from": 3, "1": 4, "union": 5, "users": 6, "or": 7, "xp_cmdshell": 8, "id": 9, "name": 10, "product": 11, "update": 12, "user": 13, "set": 14}}

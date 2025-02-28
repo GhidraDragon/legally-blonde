@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "git", "head", "gitignore", "config", "repo", "mention"], "word2idx": {"<unk>": 0, "git": 1, "head": 2, "gitignore": 3, "config": 4, "repo": 5, "mention": 6}}

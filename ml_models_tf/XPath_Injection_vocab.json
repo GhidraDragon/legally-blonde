@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "text", "users", "user", "secret", "contains", "test", "normal", "xml", "legitimate", "xpath"], "word2idx": {"<unk>": 0, "text": 1, "users": 2, "user": 3, "secret": 4, "contains": 5, "test": 6, "normal": 7, "xml": 8, "legitimate": 9, "xpath": 10}}

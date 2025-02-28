@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "echo", "exploit", "bash", "script", "safe"], "word2idx": {"<unk>": 0, "echo": 1, "exploit": 2, "bash": 3, "script": 4, "safe": 5}}

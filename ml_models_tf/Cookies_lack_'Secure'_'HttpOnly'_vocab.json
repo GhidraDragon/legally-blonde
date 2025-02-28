@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "set", "cookie", "sessionid", "abc123", "secure", "httponly"], "word2idx": {"<unk>": 0, "set": 1, "cookie": 2, "sessionid": 3, "abc123": 4, "secure": 5, "httponly": 6}}

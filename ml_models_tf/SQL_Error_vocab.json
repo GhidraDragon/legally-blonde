@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "sql", "syntax", "error", "near", "from", "odbc", "server", "driver", "failed", "in", "your", "normal", "query", "logging", "enabled"], "word2idx": {"<unk>": 0, "sql": 1, "syntax": 2, "error": 3, "near": 4, "from": 5, "odbc": 6, "server": 7, "driver": 8, "failed": 9, "in": 10, "your": 11, "normal": 12, "query": 13, "logging": 14, "enabled": 15}}

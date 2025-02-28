@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "etc", "passwd", "boot", "ini", "safe", "file", "read"], "word2idx": {"<unk>": 0, "etc": 1, "passwd": 2, "boot": 3, "ini": 4, "safe": 5, "file": 6, "read": 7}}

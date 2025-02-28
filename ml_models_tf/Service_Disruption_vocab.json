@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "503", "service", "unavailable", "502", "bad", "gateway", "200", "ok"], "word2idx": {"<unk>": 0, "503": 1, "service": 2, "unavailable": 3, "502": 4, "bad": 5, "gateway": 6, "200": 7, "ok": 8}}

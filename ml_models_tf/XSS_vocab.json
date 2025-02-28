@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "alert", "script", "x", "img", "src", "onerror", "1", "svg", "onload", "svgxss", "function", "hello", "var", "cleanvar", "5"], "word2idx": {"<unk>": 0, "alert": 1, "script": 2, "x": 3, "img": 4, "src": 5, "onerror": 6, "1": 7, "svg": 8, "onload": 9, "svgxss": 10, "function": 11, "hello": 12, "var": 13, "cleanvar": 14, "5": 15}}

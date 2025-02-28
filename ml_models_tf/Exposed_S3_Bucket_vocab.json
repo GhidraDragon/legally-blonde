@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "s3", "amazonaws", "com", "mybucket", "bucket", "normal", "usage"], "word2idx": {"<unk>": 0, "s3": 1, "amazonaws": 2, "com": 3, "mybucket": 4, "bucket": 5, "normal": 6, "usage": 7}}

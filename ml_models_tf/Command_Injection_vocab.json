@@ -1,0 +1,1 @@
+{"vocab": ["<unk>", "ls", "whoami", "uname", "a", "normal", "usage"], "word2idx": {"<unk>": 0, "ls": 1, "whoami": 2, "uname": 3, "a": 4, "normal": 5, "usage": 6}}
