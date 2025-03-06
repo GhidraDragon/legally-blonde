@@ -17,6 +17,8 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
 import gym
+from gym import spaces
+import numpy as np
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -64,45 +66,47 @@ XSS_REGEXES = [
 ]
 
 VULN_PATTERNS = {
-    "SQL Error":re.compile(r"(sql\s*exception|sql\s*syntax|warning.*mysql.*|unclosed\s*quotation\s*mark|microsoft\s*ole\s*db\s*provider|odbc\s*sql\s*server\s*driver|pg_query\()",re.IGNORECASE|re.DOTALL),
-    "SQL Injection":re.compile(r"(\bunion\s+select\s|\bselect\s+\*\s+from\s|\bsleep\(|\b'or\s+1=1\b|\b'or\s+'a'='a\b|--|#|xp_cmdshell|information_schema)",re.IGNORECASE|re.DOTALL),
-    "XSS":re.compile("|".join(XSS_REGEXES),re.IGNORECASE|re.DOTALL),
-    "Directory Listing":re.compile(r"(<title>\s*index of\s*/\s*</title>|directory\s+listing\s+for)",re.IGNORECASE|re.DOTALL),
-    "File Inclusion":re.compile(r"(include|require)(_once)?\s*\(.*?http://",re.IGNORECASE|re.DOTALL),
-    "Server Error":re.compile(r"(internal\s+server\s+error|500\s+internal|traceback\s*\(most\s+recent\s+call\s+last\))",re.IGNORECASE|re.DOTALL),
-    "Shellshock":re.compile(r"\(\)\s*\{:\;};",re.IGNORECASE|re.DOTALL),
-    "Remote Code Execution":re.compile(r"(exec\(|system\(|shell_exec\(|/bin/sh|eval\(|\bpython\s+-c\s)",re.IGNORECASE|re.DOTALL),
-    "LFI/RFI":re.compile(r"(etc/passwd|boot.ini|\\\\\\\\\.\\\\pipe\\\\|\\\.\\pipe\\)",re.IGNORECASE|re.DOTALL),
-    "SSRF":re.compile(r"(127\.0\.0\.1|localhost|metadata\.google\.internal)",re.IGNORECASE|re.DOTALL),
-    "Path Traversal":re.compile(r"(\.\./\.\./|\.\./|\.\.\\)",re.IGNORECASE|re.DOTALL),
-    "Command Injection":re.compile(r"(\|\||&&|;|/bin/bash|/bin/zsh)",re.IGNORECASE|re.DOTALL),
-    "WordPress Leak":re.compile(r"(wp-content|wp-includes|wp-admin)",re.IGNORECASE|re.DOTALL),
-    "Java Error":re.compile(r"(java\.lang\.|exception\s+in\s+thread\s+\"main\")",re.IGNORECASE|re.DOTALL),
-    "Open Redirect":re.compile(r"(=\s*https?:\/\/)",re.IGNORECASE|re.DOTALL),
-    "Deserialization":re.compile(r"(java\.io\.objectinputstream|ysoserial|__proto__|constructor\.prototype)",re.IGNORECASE|re.DOTALL),
-    "XXE":re.compile(r"(<!doctype\s+[^>]*\[.*<!entity\s+[^>]*system)",re.IGNORECASE|re.DOTALL),
-    "File Upload":re.compile(r"(multipart/form-data.*filename=)",re.IGNORECASE|re.DOTALL),
-    "Prototype Pollution":re.compile(r"(\.__proto__|object\.prototype|object\.setprototypeof)",re.IGNORECASE|re.DOTALL),
-    "NoSQL Injection":re.compile(r"(db\.\w+\.find\(|\$\w+\{|{\s*\$where\s*:)",re.IGNORECASE|re.DOTALL),
-    "Exposed Git Directory":re.compile(r"(\.git/HEAD|\.gitignore|\.git/config)",re.IGNORECASE|re.DOTALL),
-    "Potential Secrets":re.compile(r"(aws_access_key_id|aws_secret_access_key|api_key|private_key|authorization:\s*bearer\s+[0-9a-z\-_\.]+)",re.IGNORECASE|re.DOTALL),
-    "JWT Token Leak":re.compile(r"(eyjh[a-z0-9_-]*\.[a-z0-9_-]+\.[a-z0-9_-]+)",re.IGNORECASE|re.DOTALL),
-    "ETC Shadow Leak":re.compile(r"/etc/shadow",re.IGNORECASE|re.DOTALL),
-    "Possible Password Leak":re.compile(r"(password\s*=\s*\w+)",re.IGNORECASE|re.DOTALL),
-    "CC Leak":re.compile(r"\b(?:\d[ -]*?){13,16}\b"),
-    "CRLF Injection":re.compile(r"(\r\n|%0d%0a|%0A%0D)",re.IGNORECASE|re.DOTALL),
-    "HTTP Request Smuggling":re.compile(r"(content-length:\s*\d+.*\r?\n\s*transfer-encoding:\s*chunked|transfer-encoding:\s*chunked.*\r?\n\s*content-length:\s*\d+)",re.IGNORECASE|re.DOTALL),
-    "LDAP Injection":re.compile(r"(\(\w+=\*\)|\|\(\w+=\*\)|\(\w+~=\*)",re.IGNORECASE|re.DOTALL),
-    "XPath Injection":re.compile(r"(/[^/]+/|\[[^\]]+\]|text\(\)=)",re.IGNORECASE|re.DOTALL),
-    "Exposed S3 Bucket":re.compile(r"s3\.amazonaws\.com",re.IGNORECASE),
-    "Exposed Azure Blob":re.compile(r"blob\.core\.windows\.net",re.IGNORECASE),
-    "Exposed K8s Secrets":re.compile(r"kube[\s_-]*config|k8s[\s_-]*secret|kubeadm[\s_-]*token",re.IGNORECASE|re.DOTALL),
-    "npm Token":re.compile(r"npm[_-]token_[a-z0-9]{36}",re.IGNORECASE|re.DOTALL)
+    "SQL Error": re.compile(r"(sql\s*exception|sql\s*syntax|warning.*mysql.*|unclosed\s*quotation\s*mark|microsoft\s*ole\s*db\s*provider|odbc\s*sql\s*server\s*driver|pg_query\()",re.IGNORECASE|re.DOTALL),
+    "SQL Injection": re.compile(r"(\bunion\s+select\s|\bselect\s+\*\s+from\s|\bsleep\(|\b'or\s+1=1\b|\b'or\s+'a'='a\b|--|#|xp_cmdshell|information_schema)",re.IGNORECASE|re.DOTALL),
+    "XSS": re.compile("|".join(XSS_REGEXES),re.IGNORECASE|re.DOTALL),
+    "Directory Listing": re.compile(r"(<title>\s*index of\s*/\s*</title>|directory\s+listing\s+for)",re.IGNORECASE|re.DOTALL),
+    "File Inclusion": re.compile(r"(include|require)(_once)?\s*\(.*?http://",re.IGNORECASE|re.DOTALL),
+    "Server Error": re.compile(r"(internal\s+server\s+error|500\s+internal|traceback\s*\(most\s+recent\s+call\s+last\))",re.IGNORECASE|re.DOTALL),
+    "Shellshock": re.compile(r"\(\)\s*\{:\;};",re.IGNORECASE|re.DOTALL),
+    "Remote Code Execution": re.compile(r"(exec\(|system\(|shell_exec\(|/bin/sh|eval\(|\bpython\s+-c\s)",re.IGNORECASE|re.DOTALL),
+    "LFI/RFI": re.compile(r"(etc/passwd|boot.ini|\\\\\\\\\.\\\\pipe\\\\|\\\.\\pipe\\)",re.IGNORECASE|re.DOTALL),
+    "SSRF": re.compile(r"(127\.0\.0\.1|localhost|metadata\.google\.internal)",re.IGNORECASE|re.DOTALL),
+    "Path Traversal": re.compile(r"(\.\./\.\./|\.\./|\.\.\\)",re.IGNORECASE|re.DOTALL),
+    "Command Injection": re.compile(r"(\|\||&&|;|/bin/bash|/bin/zsh)",re.IGNORECASE|re.DOTALL),
+    "WordPress Leak": re.compile(r"(wp-content|wp-includes|wp-admin)",re.IGNORECASE|re.DOTALL),
+    "Java Error": re.compile(r"(java\.lang\.|exception\s+in\s+thread\s+\"main\")",re.IGNORECASE|re.DOTALL),
+    "Open Redirect": re.compile(r"(=\s*https?:\/\/)",re.IGNORECASE|re.DOTALL),
+    "Deserialization": re.compile(r"(java\.io\.objectinputstream|ysoserial|__proto__|constructor\.prototype)",re.IGNORECASE|re.DOTALL),
+    "XXE": re.compile(r"(<!doctype\s+[^>]*\[.*<!entity\s+[^>]*system)",re.IGNORECASE|re.DOTALL),
+    "File Upload": re.compile(r"(multipart/form-data.*filename=)",re.IGNORECASE|re.DOTALL),
+    "Prototype Pollution": re.compile(r"(\.__proto__|object\.prototype|object\.setprototypeof)",re.IGNORECASE|re.DOTALL),
+    "NoSQL Injection": re.compile(r"(db\.\w+\.find\(|\$\w+\{|{\s*\$where\s*:)",re.IGNORECASE|re.DOTALL),
+    "Exposed Git Directory": re.compile(r"(\.git/HEAD|\.gitignore|\.git/config)",re.IGNORECASE|re.DOTALL),
+    "Potential Secrets": re.compile(r"(aws_access_key_id|aws_secret_access_key|api_key|private_key|authorization:\s*bearer\s+[0-9a-z\-_\.]+)",re.IGNORECASE|re.DOTALL),
+    "JWT Token Leak": re.compile(r"(eyjh[a-z0-9_-]*\.[a-z0-9_-]+\.[a-z0-9_-]+)",re.IGNORECASE|re.DOTALL),
+    "ETC Shadow Leak": re.compile(r"/etc/shadow",re.IGNORECASE|re.DOTALL),
+    "Possible Password Leak": re.compile(r"(password\s*=\s*\w+)",re.IGNORECASE|re.DOTALL),
+    "CC Leak": re.compile(r"\b(?:\d[ -]*?){13,16}\b"),
+    "CRLF Injection": re.compile(r"(\r\n|%0d%0a|%0A%0D)",re.IGNORECASE|re.DOTALL),
+    "HTTP Request Smuggling": re.compile(r"(content-length:\s*\d+.*\r?\n\s*transfer-encoding:\s*chunked|transfer-encoding:\s*chunked.*\r?\n\s*content-length:\s*\d+)",re.IGNORECASE|re.DOTALL),
+    "LDAP Injection": re.compile(r"(\(\w+=\*\)|\|\(\w+=\*\)|\(\w+~=\*)",re.IGNORECASE|re.DOTALL),
+    "XPath Injection": re.compile(r"(/[^/]+/|\[[^\]]+\]|text\(\)=)",re.IGNORECASE|re.DOTALL),
+    "Exposed S3 Bucket": re.compile(r"s3\.amazonaws\.com",re.IGNORECASE),
+    "Exposed Azure Blob": re.compile(r"blob\.core\.windows\.net",re.IGNORECASE),
+    "Exposed K8s Secrets": re.compile(r"kube[\s_-]*config|k8s[\s_-]*secret|kubeadm[\s_-]*token",re.IGNORECASE|re.DOTALL),
+    "npm Token": re.compile(r"npm[_-]token_[a-z0-9]{36}",re.IGNORECASE|re.DOTALL),
+    "GraphQL Injection": re.compile(r"(query\s*\{|\{\s*query\s*|mutation\s*\{|\{\s*mutation\s*)",re.IGNORECASE|re.DOTALL),
+    "Regex DOS": re.compile(r"(\(\?[^\)]*?\)|\[[^\]]{100,}\])",re.IGNORECASE|re.DOTALL)
 }
 
 HEADER_PATTERNS = {
-    "Missing Security Headers":["Content-Security-Policy","X-Content-Type-Options","X-Frame-Options","X-XSS-Protection","Strict-Transport-Security"],
-    "Outdated or Insecure Server":re.compile(r"(apache/2\.2\.\d|nginx/1\.10\.\d|iis/6\.0|php/5\.2)",re.IGNORECASE),
+    "Missing Security Headers": ["Content-Security-Policy","X-Content-Type-Options","X-Frame-Options","X-XSS-Protection","Strict-Transport-Security"],
+    "Outdated or Insecure Server": re.compile(r"(apache/2\.2\.\d|nginx/1\.10\.\d|iis/6\.0|php/5\.2)",re.IGNORECASE),
 }
 
 VULN_EXPLANATIONS = {
@@ -149,6 +153,8 @@ VULN_EXPLANATIONS = {
     "Exposed Azure Blob":"Unsecured Azure blob container.",
     "Exposed K8s Secrets":"Kubernetes secrets possibly exposed.",
     "npm Token":"npm private token possibly leaked.",
+    "GraphQL Injection":"Possible GraphQL injection or misconfiguration.",
+    "Regex DOS":"Potential regex-based denial of service.",
     "No explanation":"No explanation"
 }
 
@@ -199,15 +205,29 @@ MULTI_VULN_SAMPLES = {
     "Exposed S3 Bucket":(["mybucket.s3.amazonaws.com","bucket.s3.amazonaws.com"],["normal usage"]),
     "Exposed Azure Blob":([".blob.core.windows.net"],["safe azure usage"]),
     "Exposed K8s Secrets":(["kubeconfig","k8s_secret","kubeadm token"],["kube cluster safe"]),
-    "npm Token":(["npm_token_123456789012345678901234567890123456"],["safe usage"])
+    "npm Token":(["npm_token_123456789012345678901234567890123456"],["safe usage"]),
+    "GraphQL Injection":(["query { user(id:\"1\")","mutation { createUser"],["safe gql usage"]),
+    "Regex DOS": (["(a|aa|aaa)*","(x|y|z)+{100,}"],["safe patterns"])
 }
 
 def train_base_ml_models():
     if not ML_CLASSIFIER_AVAILABLE:
         return
     if not os.path.isfile(XSS_MODEL_PATH):
-        sus_js = ["<script>alert('Hacked!')</script>","javascript:alert('XSS')","onerror=alert(document.cookie)","<img src=x onerror=alert(1)>","<svg onload=alert('svgxss')>","<script src='http://evil.com/x.js'></script>"]
-        ben_js = ["function greetUser(name) {}","var x=5; if(x>2){x++;}","document.getElementById('x').innerText='Safe';","function normalFunc(){}"]
+        sus_js = [
+            "<script>alert('Hacked!')</script>",
+            "javascript:alert('XSS')",
+            "onerror=alert(document.cookie)",
+            "<img src=x onerror=alert(1)>",
+            "<svg onload=alert('svgxss')>",
+            "<script src='http://evil.com/x.js'></script>"
+        ]
+        ben_js = [
+            "function greetUser(name) {}",
+            "var x=5; if(x>2){x++;}",
+            "document.getElementById('x').innerText='Safe';",
+            "function normalFunc(){}"
+        ]
         X_data = sus_js + ben_js
         y_data = [1]*len(sus_js) + [0]*len(ben_js)
         vec = TfidfVectorizer(ngram_range=(1,2),max_features=500)
@@ -216,8 +236,21 @@ def train_base_ml_models():
         clf.fit(X_vec,y_data)
         joblib.dump({"vectorizer":vec,"classifier":clf},XSS_MODEL_PATH)
     if not os.path.isfile(SQLI_MODEL_PATH):
-        sus_sql = ["' OR '1'='1","UNION SELECT username, password FROM users","' OR 'a'='a","SELECT * FROM table WHERE id='","' DROP TABLE users --","xp_cmdshell","OR 1=1 LIMIT 1"]
-        ben_sql = ["SELECT id, name FROM products","INSERT INTO users VALUES ('test','pass')","UPDATE accounts SET balance=500 WHERE userid=1","CREATE TABLE logs (entry TEXT)"]
+        sus_sql = [
+            "' OR '1'='1",
+            "UNION SELECT username, password FROM users",
+            "' OR 'a'='a",
+            "SELECT * FROM table WHERE id='",
+            "' DROP TABLE users --",
+            "xp_cmdshell",
+            "OR 1=1 LIMIT 1"
+        ]
+        ben_sql = [
+            "SELECT id, name FROM products",
+            "INSERT INTO users VALUES ('test','pass')",
+            "UPDATE accounts SET balance=500 WHERE userid=1",
+            "CREATE TABLE logs (entry TEXT)"
+        ]
         X_data = sus_sql + ben_sql
         y_data = [1]*len(sus_sql) + [0]*len(ben_sql)
         vec = TfidfVectorizer(ngram_range=(1,2),max_features=500)
@@ -354,31 +387,64 @@ def analyze_query_params(url):
                 f.append(label_entry("Suspicious param value in","query-param detection",f"{p}={v}"))
     return f
 
+class InjectionsEnv(gym.Env):
+    def __init__(self):
+        super(InjectionsEnv, self).__init__()
+        self.payloads = [
+            "' OR '1'='1",
+            "<script>alert(1)</script>",
+            "; ls;",
+            "&& cat /etc/passwd",
+            "<img src=x onerror=alert(2)>",
+            "'; DROP TABLE users; --",
+            "|| ping -c 4 127.0.0.1 ||"
+        ]
+        self.action_space = spaces.Discrete(len(self.payloads))
+        self.observation_space = spaces.Discrete(1)
+        self.state = 0
+
+    def reset(self):
+        self.state = 0
+        return self.state
+
+    def step(self, action):
+        reward = 0
+        done = True
+        reward = random.random()
+        return self.state, reward, done, {}
+
+def run_mcts_for_injections(env,iterations=10):
+    best_action = 0
+    best_q = -1
+    for a in range(env.action_space.n):
+        q_value = 0
+        for _ in range(iterations):
+            _, r, _, _ = env.step(a)
+            q_value += r
+        avg_q = q_value / iterations
+        if avg_q > best_q:
+            best_q = avg_q
+            best_action = a
+    return env.payloads[best_action]
+
 def fuzz_injection_tests(url):
     fs = []
     success_injections = []
     failed_injections = []
-    pl = [
-        "' OR '1'='1",
-        "<script>alert(1)</script>",
-        "; ls;",
-        "&& cat /etc/passwd",
-        "<img src=x onerror=alert(2)>",
-        "'; DROP TABLE users; --",
-        "|| ping -c 4 127.0.0.1 ||"
-    ]
-    for p in pl:
-        injection_url = f"{url}?inj={urllib.parse.quote(p)}"
+    env = InjectionsEnv()
+    for _ in range(len(env.payloads)):
+        injection = run_mcts_for_injections(env,5)
+        injection_url = f"{url}?inj={urllib.parse.quote(injection)}"
         try:
             r = requests.get(injection_url,timeout=3,headers=CUSTOM_HEADERS)
             new_matches = scan_for_vuln_patterns(r.text)
             fs.extend(new_matches)
             if new_matches:
-                success_injections.append(p)
+                success_injections.append(injection)
             else:
-                failed_injections.append(p)
+                failed_injections.append(injection)
         except:
-            failed_injections.append(p)
+            failed_injections.append(injection)
     print(f"Fuzz injection results for {url}")
     print("  Success:", success_injections)
     print("  Failure:", failed_injections)
@@ -528,9 +594,7 @@ def scan_with_chromedriver(url):
     try:
         o = Options()
         o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
-        s = ChromeService("chromedriver")
-        d = webdriver.Chrome(service=s,options=o)
+        d = webdriver.Chrome(options=o)
         d.get(url)
         found_flags = []
         try:

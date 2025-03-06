@@ -517,7 +517,6 @@ def scan_with_chromedriver(url):
     try:
         o = Options()
         o.add_argument("--headless=new")
-        o.binary_location = "chrome/Google Chrome for Testing.app"
         s = ChromeService("chromedriver")
         d = webdriver.Chrome(service=s,options=o)
         d.get(url)
@@ -626,54 +625,10 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         plt.show()
     return results
 
-def scrape_flower_images(num_images=20, out_dir="flower_images"):
-    if not SELENIUM_AVAILABLE:
-        return
-    search_url = "https://www.google.com/search?q=flower&udm=2&dpr=1&tbm=isch"
-    options = Options()
-    options.add_argument("--headless=new")
-    service = ChromeService("chromedriver")
-    driver = webdriver.Chrome(service=service, options=options)
-    driver.get(search_url)
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir, exist_ok=True)
-    images_downloaded = 0
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    while images_downloaded < num_images:
-        thumbs = driver.find_elements(By.CSS_SELECTOR, "img.rg_i")
-        for thumb in thumbs:
-            if images_downloaded >= num_images:
-                break
-            try:
-                thumb.click()
-                time.sleep(1)
-                full_res = driver.find_element(By.CSS_SELECTOR, "img.n3VNCb")
-                src = full_res.get_attribute("src")
-                if src and src.startswith("http"):
-                    r = requests.get(src, timeout=5)
-                    ext = ".jpg"
-                    fn = os.path.join(out_dir, f"flower_{images_downloaded}{ext}")
-                    with open(fn, "wb") as f:
-                        f.write(r.content)
-                    images_downloaded += 1
-            except:
-                pass
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            try:
-                more_btn = driver.find_element(By.CSS_SELECTOR, ".mye4qd")
-                more_btn.click()
-                time.sleep(2)
-            except:
-                break
-        last_height = new_height
-    driver.quit()
-
 def main():
     sys.stdout.reconfigure(line_buffering=True)
-    scrape_flower_images(num_images=100, out_dir="flower_images")
+    # No flower download call here
+    pass
 
 if __name__=="__main__":
     main()
