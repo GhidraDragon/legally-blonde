@@ -16,6 +16,7 @@ import networkx as nx
 from pathlib import Path
 from bs4 import BeautifulSoup
 from test_sites import test_sites
+import gym
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -355,6 +356,8 @@ def analyze_query_params(url):
 
 def fuzz_injection_tests(url):
     fs = []
+    success_injections = []
+    failed_injections = []
     pl = [
         "' OR '1'='1",
         "<script>alert(1)</script>",
@@ -365,12 +368,20 @@ def fuzz_injection_tests(url):
         "|| ping -c 4 127.0.0.1 ||"
     ]
     for p in pl:
+        injection_url = f"{url}?inj={urllib.parse.quote(p)}"
         try:
-            tu = f"{url}?inj={urllib.parse.quote(p)}"
-            r = requests.get(tu,timeout=3,headers=CUSTOM_HEADERS)
-            fs.extend(scan_for_vuln_patterns(r.text))
+            r = requests.get(injection_url,timeout=3,headers=CUSTOM_HEADERS)
+            new_matches = scan_for_vuln_patterns(r.text)
+            fs.extend(new_matches)
+            if new_matches:
+                success_injections.append(p)
+            else:
+                failed_injections.append(p)
         except:
-            pass
+            failed_injections.append(p)
+    print(f"Fuzz injection results for {url}")
+    print("  Success:", success_injections)
+    print("  Failure:", failed_injections)
     return fs
 
 def repeated_disruption_test(url,attempts=3):
