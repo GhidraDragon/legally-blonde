@@ -4,6 +4,9 @@ Anyways if the White House and US District of Northern Cal (neither are closed I
 
 Anyways, please enjoy with your own enhancements, to infinity and AGI beyond! Why not build a search engine? Figure out how to index what people search for from the data you scrape from here, since it doesn't revisit any already, and etc. Figure out how many mediocre fruit links (they have so many pages) you want to reach BFS from white house etc. JK it's just depth!
 
+<img width="808" alt="image" src="https://github.com/user-attachments/assets/25c0093d-6bd9-40a7-bcea-e8dd700aad27" />
+
+
 # legally-blonde
 
 ![image](https://github.com/user-attachments/assets/0660967f-65de-4534-8dbd-9c8db5632cea)
