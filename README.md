@@ -1,3 +1,6 @@
+![image](https://github.com/user-attachments/assets/95413bd9-4f38-42a0-be57-6a2544a44ec6)
+
+
 ![image](https://github.com/user-attachments/assets/7246875f-d8a1-48fb-908e-eeb463962217)
 This is the most efficient global traversal algorithm available, literally (assuning it works properly which today I looked at it seems to). I have yet to look at or change a single line of code. I was wondering why no results or when results (im tired) but it's because depth is 10 which you could change or I could.
 
