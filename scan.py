@@ -365,8 +365,6 @@ def fuzz_injection_tests(url):
         "|| ping -c 4 127.0.0.1 ||"
     ]
     for p in pl:
-        # Removed long random sleep to increase concurrency
-        # time.sleep(random.uniform(1.2,2.5))
         try:
             tu = f"{url}?inj={urllib.parse.quote(p)}"
             r = requests.get(tu,timeout=3,headers=CUSTOM_HEADERS)
@@ -378,8 +376,6 @@ def fuzz_injection_tests(url):
 def repeated_disruption_test(url,attempts=3):
     f = []
     for _ in range(attempts):
-        # Removed long random sleep to increase concurrency
-        # time.sleep(random.uniform(1.0,2.0))
         try:
             r = requests.get(url,timeout=3,headers=CUSTOM_HEADERS)
             if r.status_code>=500:
@@ -403,8 +399,6 @@ def scan_target(url):
     ds.extend(fuzz_injection_tests(url))
     ds.extend(repeated_disruption_test(url))
     try:
-        # Removed longer random sleep to increase concurrency
-        # time.sleep(random.uniform(1.5,3.0))
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
         p_tags = scan_for_vuln_patterns(b)
@@ -521,8 +515,6 @@ def scan_with_chromedriver(url):
     if not SELENIUM_AVAILABLE:
         return {"url":url,"error":"Selenium not available","data":"","found_flags":[]}
     try:
-        # Removed longer random sleep to increase concurrency
-        # time.sleep(random.uniform(1.0,2.0))
         o = Options()
         o.add_argument("--headless=new")
         o.binary_location = "chrome/Google Chrome for Testing.app"
@@ -540,9 +532,7 @@ def scan_with_chromedriver(url):
                     except:
                         pass
                 try:
-                    # time.sleep(1.5) # commented out to increase concurrency
                     form.submit()
-                    # time.sleep(1)   # commented out to increase concurrency
                     page_source_after_submit = d.page_source
                     matches = re.findall(r"(CTF\{.*?\})", page_source_after_submit, re.IGNORECASE)
                     if matches:
@@ -571,7 +561,6 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         depth_map[s] = 0
         G.add_node(s,depth=0)
     results = []
-    # Increased bot_executor max_workers from 10 to 50
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     while q:
@@ -584,8 +573,6 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         if d>max_depth:
             break
         visited.add(u)
-        # Removed or commented out random sleep to allow faster concurrency
-        # time.sleep(random.uniform(0.3,0.8))
         f1 = http_executor.submit(scan_target,u)
         f2 = bot_executor.submit(scan_with_chromedriver,u)
         r1 = f1.result()
@@ -646,7 +633,13 @@ def main():
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
     train_all_vulnerability_models()
-    all_results = priority_bfs_crawl_and_scan(test_sites,20)
+    user_depth = 2
+    if len(sys.argv) > 1:
+        try:
+            user_depth = int(sys.argv[1])
+        except:
+            pass
+    all_results = priority_bfs_crawl_and_scan(test_sites,user_depth)
     for r in all_results:
         print(f"\nServer: {r.get('server','Unknown')} | {r['url']}")
         if "error" in r and r["error"]:

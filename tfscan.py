@@ -310,7 +310,8 @@ def load_tf_model(path):
         ckpt = json.load(f)
     vocab = ckpt["vocab"]
     word2idx = ckpt["word2idx"]
-    model = tf.keras.models.load_model(path)
+    # Minimal change below: compile=False and custom_objects to avoid variable mismatch in Embedding & optimizer
+    model = tf.keras.models.load_model(path, compile=False, custom_objects={"EnhancedTFNet": EnhancedTFNet})
     classifier = TFClassifier(vocab, word2idx, path, len(vocab))
     classifier.model = model
     return classifier
