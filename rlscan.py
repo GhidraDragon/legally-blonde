@@ -106,55 +106,57 @@ VULN_PATTERNS = {
 
 HEADER_PATTERNS = {
     "Missing Security Headers": ["Content-Security-Policy","X-Content-Type-Options","X-Frame-Options","X-XSS-Protection","Strict-Transport-Security"],
-    "Outdated or Insecure Server": re.compile(r"(apache/2\.2\.\d|nginx/1\.10\.\d|iis/6\.0|php/5\.2)",re.IGNORECASE),
+    "Outdated or Insecure Server": re.compile(r"(apache/2\.2\.\d|nginx/1\.10\.\d|iis/6\.0|php/5\.2)",re.IGNORECASE)
 }
 
 VULN_EXPLANATIONS = {
-    "SQL Error":"Server returned DB error messages.",
-    "SQL Injection":"Likely injection in SQL queries.",
-    "XSS":"Injected client-side scripts.",
-    "Directory Listing":"Exposed directory contents.",
-    "File Inclusion":"Local/remote file inclusion.",
-    "Server Error":"HTTP 500 or similar response.",
-    "Shellshock":"Bash vulnerability discovered.",
-    "Remote Code Execution":"User input can run code.",
-    "LFI/RFI":"File references for inclusion.",
-    "SSRF":"Server-Side Request Forgery found.",
-    "Path Traversal":"Possible directory traversal.",
-    "Command Injection":"Shell commands inserted.",
-    "WordPress Leak":"WordPress paths or files.",
-    "Java Error":"Java exceptions or traces.",
-    "Open Redirect":"Redirects to external URL.",
-    "Deserialization":"Unsafe object deserialization.",
-    "XXE":"XML External Entity usage.",
-    "File Upload":"Multipart form can upload.",
-    "Prototype Pollution":"JS prototype manipulation.",
-    "NoSQL Injection":"Mongo-like injection references.",
-    "Exposed Git Directory":"Git config or HEAD visible.",
-    "Potential Secrets":"API keys or tokens leaked.",
-    "JWT Token Leak":"JWT tokens exposed.",
-    "ETC Shadow Leak":"Reference to /etc/shadow.",
-    "Missing Security Headers":"Key headers absent.",
-    "Outdated or Insecure Server":"Old or insecure server.",
-    "Cookies lack 'Secure'/'HttpOnly'":"Cookie flags missing.",
-    "Suspicious param name:":"Param name looks malicious.",
-    "Suspicious param value in":"Param value looks malicious.",
-    "Form uses GET with password/hidden":"Sensitive data in GET.",
-    "Suspicious form fields (cmd/shell/token)":"Malicious field names.",
-    "POST form without CSRF token":"Form missing CSRF token.",
-    "Service Disruption":"5xx errors or repeated failures.",
-    "Possible Password Leak":"Possible credential leakage.",
-    "CC Leak":"Credit card pattern found.",
-    "CRLF Injection":"New line injection discovered.",
-    "HTTP Request Smuggling":"Conflicting request headers found.",
-    "LDAP Injection":"Possible directory service injection.",
-    "XPath Injection":"Injected XPath queries.",
-    "Exposed S3 Bucket":"Cloud storage might be public.",
-    "Exposed Azure Blob":"Unsecured Azure blob container.",
-    "Exposed K8s Secrets":"Kubernetes secrets possibly exposed.",
-    "npm Token":"npm private token possibly leaked.",
-    "GraphQL Injection":"Possible GraphQL injection or misconfiguration.",
-    "Regex DOS":"Potential regex-based denial of service.",
+    "SQL Error":"Server returned detailed database error messages revealing structure or SQL syntax issues.",
+    "SQL Injection":"Possible direct injection into SQL queries, risking data exfiltration or destructive queries.",
+    "XSS":"Reflected, stored, or DOM-based cross-site scripting found, potentially allowing script execution in the client.",
+    "Directory Listing":"Server exposes directory contents, allowing enumeration or data leakage.",
+    "File Inclusion":"Local or remote file inclusion may allow reading of sensitive files or remote code execution.",
+    "Server Error":"HTTP 500 or similar errors indicating unstable or unhandled exceptions on the server side.",
+    "Shellshock":"Vulnerable to Bash environment variable injection.",
+    "Remote Code Execution":"Code or commands can be executed on the remote server.",
+    "LFI/RFI":"Local or Remote File Inclusion vulnerability references in the response or parameters.",
+    "SSRF":"Potential server-side request forgery, allowing requests to internal services.",
+    "Path Traversal":"Traversal attempt or reference that may allow accessing arbitrary files on the server.",
+    "Command Injection":"Executing OS commands via user input injection.",
+    "WordPress Leak":"Indicates WordPress installation leakage, might reveal version or sensitive WP paths.",
+    "Java Error":"Exposed Java stack trace or error logs that can reveal code structure.",
+    "Open Redirect":"Redirecting users to untrusted external domains via user input.",
+    "Deserialization":"Data suggests unsafe object deserialization paths, leading to code execution.",
+    "XXE":"XML external entity usage, which can leak files or execute SSRF.",
+    "File Upload":"Server-side file upload point can introduce malicious files if not secured.",
+    "Prototype Pollution":"Manipulating JS object prototypes can compromise logic or cause RCE in some cases.",
+    "NoSQL Injection":"Mongo-like or other NoSQL injection references found in the payload or response.",
+    "Exposed Git Directory":".git folder or config data exposed, revealing code history or credentials.",
+    "Potential Secrets":"Possible keys/tokens in the response that could be sensitive.",
+    "JWT Token Leak":"JSON Web Token is exposed, risking session hijack.",
+    "ETC Shadow Leak":"Direct mention or reading of /etc/shadow indicates severe file disclosure.",
+    "Missing Security Headers":"Important headers not present; can open XSS, clickjacking, or MITM risk.",
+    "Outdated or Insecure Server":"Server version is known to have vulnerabilities.",
+    "Cookies lack 'Secure'/'HttpOnly'":"Cookies do not have secure or HTTPOnly flags, raising session hijack risk.",
+    "Suspicious param name:":"Parameter name strongly suggests command, shell, or token usage.",
+    "Suspicious param value in":"Parameter value suggests injection attempts or malicious content.",
+    "Form uses GET with password/hidden":"Sensitive data sent in GET query, risking exposure in logs or referrers.",
+    "Suspicious form fields (cmd/shell/token)":"Potential malicious or elevated function fields in forms.",
+    "POST form without CSRF token":"Form lacks CSRF protection token, vulnerable to cross-site request forgery.",
+    "Service Disruption":"Repeated 5xx or timeouts indicating server instability or overload.",
+    "Possible Password Leak":"A direct 'password=...' mention in the response or code snippet.",
+    "CC Leak":"Raw credit card number patterns in the output, indicating possible data leak.",
+    "CRLF Injection":"HTTP header injection or response splitting possibility.",
+    "HTTP Request Smuggling":"Conflicting Content-Length/Transfer-Encoding likely enabling request smuggling.",
+    "LDAP Injection":"Injection attempt for LDAP queries.",
+    "XPath Injection":"Injection attempt for XPath queries.",
+    "Exposed S3 Bucket":"Open or visible AWS S3 bucket references.",
+    "Exposed Azure Blob":"Open or visible Azure blob container references.",
+    "Exposed K8s Secrets":"References to Kubernetes config or tokens.",
+    "npm Token":"npm private access token leaked.",
+    "GraphQL Injection":"Possible injection or misconfiguration in GraphQL queries.",
+    "Regex DOS":"Potential catastrophic backtracking in a regex leading to DoS.",
+    "CORS Misconfiguration":"Server sets overly broad Access-Control-Allow-Origin or credentials incorrectly.",
+    "Insecure HTTP Methods":"Server allows potentially risky HTTP methods like PUT, DELETE, or TRACE.",
     "No explanation":"No explanation"
 }
 
@@ -415,9 +417,8 @@ class InjectionsEnv(gym.Env):
         return self.state
 
     def step(self, action):
-        reward = 0
-        done = True
         reward = random.random()
+        done = True
         return self.state, reward, done, {}
 
     def update_payloads(self, successes, failures):
@@ -480,7 +481,7 @@ def fuzz_injection_tests(url):
         except:
             failed_injections.append(injection)
         env.update_payloads(success_injections, failed_injections)
-    return fs
+    return fs, {"success": success_injections, "fail": failed_injections}
 
 def repeated_disruption_test(url,attempts=3):
     f = []
@@ -503,10 +504,43 @@ def extract_js_functions(ht):
             d.append(mm.strip())
     return d
 
+def check_cors_misconfiguration(url):
+    findings = []
+    custom_origin = {"Origin":"https://evil.com"}
+    try:
+        r = requests.get(url, headers={**CUSTOM_HEADERS, **custom_origin}, timeout=5)
+        if "Access-Control-Allow-Origin" in r.headers:
+            acao = r.headers["Access-Control-Allow-Origin"]
+            if acao.strip() == "*" or acao.strip() == "https://evil.com":
+                credentials = r.headers.get("Access-Control-Allow-Credentials","")
+                snip = f"Allow-Origin:{acao}; Allow-Credentials:{credentials}"
+                findings.append(label_entry("CORS Misconfiguration","cors-detection",snip))
+    except:
+        pass
+    return findings
+
+def check_insecure_http_methods(url):
+    findings = []
+    try:
+        r = requests.options(url, headers=CUSTOM_HEADERS, timeout=5)
+        if "Allow" in r.headers:
+            allowed = r.headers["Allow"].upper()
+            if any(m in allowed for m in ["PUT","DELETE","TRACE"]):
+                snippet = f"Methods allowed: {r.headers['Allow']}"
+                findings.append(label_entry("Insecure HTTP Methods","method-detection",snippet))
+    except:
+        pass
+    return findings
+
 def scan_target(url):
     ds = analyze_query_params(url)
-    ds.extend(fuzz_injection_tests(url))
+    injection_findings, injection_outcomes = fuzz_injection_tests(url)
+    ds.extend(injection_findings)
     ds.extend(repeated_disruption_test(url))
+    cors_findings = check_cors_misconfiguration(url)
+    ds.extend(cors_findings)
+    method_findings = check_insecure_http_methods(url)
+    ds.extend(method_findings)
     try:
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
@@ -548,7 +582,8 @@ def scan_target(url):
             "server":r.headers.get("Server","Unknown"),
             "matched_details":all_tags,
             "extracted_js_functions":funcs,
-            "body":r.text
+            "body":r.text,
+            "injection_results": injection_outcomes
         }
     except Exception as e:
         return {
@@ -557,7 +592,8 @@ def scan_target(url):
             "matched_details":ds,
             "server":"Unknown",
             "extracted_js_functions":[],
-            "body":""
+            "body":"",
+            "injection_results": injection_outcomes
         }
 
 def write_scan_results_text(rs,filename="scan_results.txt"):
@@ -574,6 +610,13 @@ def write_scan_results_text(rs,filename="scan_results.txt"):
                 if r["matched_details"]:
                     for pt,tac,snip,ex,conf in r["matched_details"]:
                         f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
+            f.write("  Injection Test Details:\n")
+            success_injs = r["injection_results"].get("success",[])
+            fail_injs = r["injection_results"].get("fail",[])
+            f.write(f"    Successful Injections ({len(success_injs)}): {success_injs}\n")
+            f.write("      Meaning: Payloads that triggered detection or anomalies.\n")
+            f.write(f"    Failed Injections ({len(fail_injs)}): {fail_injs}\n")
+            f.write("      Meaning: Payloads that did not produce notable detection.\n")
             if r.get("extracted_js_functions"):
                 f.write("  JS Functions:\n")
                 for funcdef in r["extracted_js_functions"]:
@@ -596,7 +639,8 @@ def write_scan_results_json(rs):
             "status":None,
             "error":r.get("error",""),
             "detections":[],
-            "extracted_js_functions":r.get("extracted_js_functions",[])
+            "extracted_js_functions":r.get("extracted_js_functions",[]),
+            "injection_tests": r.get("injection_results",{})
         }
         if "status_code" in r:
             i["status"] = f"{r.get('status_code','N/A')} {r.get('reason','')}"
@@ -718,7 +762,8 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
             "error":r1.get("error","") or r2.get("error",""),
             "matched_details":combined_details,
             "extracted_js_functions":combined_js,
-            "found_flags": r2.get("found_flags",[])
+            "found_flags": r2.get("found_flags",[]),
+            "injection_results": r1.get("injection_results",{})
         }
         results.append(final)
     http_executor.shutdown()
@@ -753,6 +798,12 @@ def main():
             print(f"  Error: {r['error']}")
         for pt,tactic,snippet,explanation,conf in r["matched_details"]:
             print(f"  Detected: {pt}\n    Explanation: {explanation}\n    Tactic: {tactic}\n    Snippet: {snippet}")
+        si = r["injection_results"].get("success",[])
+        fi = r["injection_results"].get("fail",[])
+        print(f"  Injection Test Successes ({len(si)}): {si}")
+        print("    Meaning: The payload triggered some detection or anomaly.")
+        print(f"  Injection Test Failures ({len(fi)}): {fi}")
+        print("    Meaning: The payload did not produce any notable issues.")
         if r.get("extracted_js_functions"):
             print("  Extracted JS Functions:")
             for f_ in r["extracted_js_functions"]:
