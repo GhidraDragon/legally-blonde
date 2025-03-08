@@ -22,16 +22,6 @@ import numpy as np
 import socket
 import ssl
 
-"""
-Adding additional vulnerability patterns and subdomain enumeration capabilities
-as part of the improvements. Vulnerability analysis comments included inline.
-
-IDOR (Insecure Direct Object Reference) can allow unauthorized users to access objects
-by providing or manipulating object references (IDs) directly, bypassing authorization.
-Exposed Jenkins can disclose administrative consoles. Race condition references can show
-timing-based vulnerabilities. 
-"""
-
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
@@ -56,6 +46,7 @@ MAX_BODY_SNIPPET_LEN = 5000
 ENABLE_HEADER_SCANNING = True
 ENABLE_FORM_PARSING = True
 CUSTOM_HEADERS = {"User-Agent":"ImprovedSecurityScanner/1.0"}
+RL_DATA_FILE = "rl_injection_data.json"
 
 XSS_REGEXES = [
     r"<\s*script[^>]*?>.*?<\s*/\s*script\s*>",
@@ -77,11 +68,6 @@ XSS_REGEXES = [
     "<script src=['\"]http://[^>]*?>"
 ]
 
-"""
-Added IDOR, Exposed Jenkins, Race Condition checks, etc. 
-These checks can reveal direct object references, Jenkins console leaks, 
-and suspicious patterns that indicate race conditions or concurrency flaws.
-"""
 VULN_PATTERNS = {
     "SQL Error": re.compile(r"(sql\s*exception|sql\s*syntax|warning.*mysql.*|unclosed\s*quotation\s*mark|microsoft\s*ole\s*db\s*provider|odbc\s*sql\s*server\s*driver|pg_query\()",re.IGNORECASE|re.DOTALL),
     "SQL Injection": re.compile(r"(\bunion\s+select\s|\bselect\s+\*\s+from\s|\bsleep\(|\b'or\s+1=1\b|\b'or\s+'a'='a\b|--|#|xp_cmdshell|information_schema)",re.IGNORECASE|re.DOTALL),
@@ -185,7 +171,7 @@ VULN_EXPLANATIONS = {
     "CORS Misconfiguration":"Server sets overly broad Access-Control-Allow-Origin or credentials incorrectly.",
     "Insecure HTTP Methods":"Server allows potentially risky HTTP methods like PUT, DELETE, or TRACE.",
     "No explanation":"No explanation",
-    "Potential WAF":"Site might be behind or protected by a WAF, or the response indicates WAF presence.",
+    "Potential WAF":"Site might be behind or protected by a WAF.",
     "ChromeDriver Error":"Error occurred while using ChromeDriver for scanning",
     "Exposed .env File":"Potentially exposed .env or backup .env file with sensitive info.",
     "Exposed Environment Variable":"Possible environment variable or secret in the response.",
@@ -193,10 +179,10 @@ VULN_EXPLANATIONS = {
     "Email Leak":"Possible email address patterns found in the response.",
     "Phone Number Leak":"Possible phone number patterns found in the response.",
     "Possible SSN Leak":"Possible Social Security Number patterns found in the response.",
-    "SSL Certificate Issue":"Possible issues with the certificate, such as expiration, invalid domain, or self-signed certificate that might not be trusted.",
-    "Insecure Direct Object Reference (IDOR)":"Allows unauthorized access or manipulation of objects by modifying direct references (IDs).",
-    "Exposed Jenkins Console":"Possible open Jenkins manage/script console or headers indicating Jenkins environment.",
-    "Race Condition":"Potential concurrency/race scenario references that might lead to inconsistent state or exploit."
+    "SSL Certificate Issue":"Possible certificate issues (expiration, invalid domain, or self-signed).",
+    "Insecure Direct Object Reference (IDOR)":"Allows unauthorized access to objects by modifying references.",
+    "Exposed Jenkins Console":"Possible open Jenkins manage/script console or related headers.",
+    "Race Condition":"Potential concurrency/race scenario references that might lead to exploitation."
 }
 
 def label_entry(label,tactic,snippet,confidence=1.0):
@@ -260,10 +246,6 @@ CVE_DB = {
     "nginx/1.10.3":"Possible CVEs: CVE-2017-7529, CVE-2019-20372"
 }
 
-"""
-New function to do simple subdomain enumeration for domain expansions.
-This further improves scanning capabilities by searching potential subdomains.
-"""
 def find_subdomains(domain, subdomains_list=["www","dev","test","admin"]):
     found_subdomains = []
     for sub in subdomains_list:
@@ -455,8 +437,21 @@ def analyze_query_params(url):
                 f.append(label_entry("Suspicious param value in","query-param detection",f"{p}={v}"))
     return f
 
+def load_rl_data():
+    if os.path.isfile(RL_DATA_FILE):
+        try:
+            with open(RL_DATA_FILE,"r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def save_rl_data(data):
+    with open(RL_DATA_FILE,"w") as f:
+        json.dump(data,f)
+
 class InjectionsEnv(gym.Env):
-    def __init__(self):
+    def __init__(self, rl_data):
         super(InjectionsEnv, self).__init__()
         self.payloads = [
             "' OR '1'='1",
@@ -470,8 +465,11 @@ class InjectionsEnv(gym.Env):
         self.action_space = spaces.Discrete(len(self.payloads))
         self.observation_space = spaces.Discrete(1)
         self.state = 0
-        self.success_counts = {p:0 for p in self.payloads}
-        self.total_counts = {p:0 for p in self.payloads}
+        self.success_counts = {}
+        self.total_counts = {}
+        for p in self.payloads:
+            self.success_counts[p] = rl_data.get("success_counts",{}).get(p,0)
+            self.total_counts[p] = rl_data.get("total_counts",{}).get(p,0)
         self.new_payloads_pool = [
             "' and 'x'='x",
             "<svg onload=alert('newXSS')>",
@@ -489,6 +487,10 @@ class InjectionsEnv(gym.Env):
 
     def update_payloads(self, successes, failures):
         for s in successes:
+            if s not in self.success_counts:
+                self.success_counts[s] = 0
+            if s not in self.total_counts:
+                self.total_counts[s] = 0
             self.success_counts[s] += 1
             self.total_counts[s] += 1
         for f in failures:
@@ -498,14 +500,18 @@ class InjectionsEnv(gym.Env):
         to_remove = []
         for p in self.payloads:
             if self.total_counts[p] >= 5:
-                ratio = self.success_counts[p] / float(self.total_counts[p])
+                ratio = 0
+                if self.total_counts[p] > 0:
+                    ratio = self.success_counts[p] / float(self.total_counts[p])
                 if ratio < 0.2:
                     to_remove.append(p)
         for r in to_remove:
             if r in self.payloads:
                 self.payloads.remove(r)
-                del self.success_counts[r]
-                del self.total_counts[r]
+                if r in self.success_counts:
+                    del self.success_counts[r]
+                if r in self.total_counts:
+                    del self.total_counts[r]
         if random.random() < 0.3 and self.new_payloads_pool:
             new_p = random.choice(self.new_payloads_pool)
             if new_p not in self.payloads:
@@ -514,27 +520,36 @@ class InjectionsEnv(gym.Env):
                 self.total_counts[new_p] = 0
         self.action_space = spaces.Discrete(len(self.payloads))
 
-def run_mcts_for_injections(env,iterations=10):
+def run_mcts_for_injections(env,iterations=10,overall_start=None):
     best_action = 0
     best_q = -1
+    start_time = time.time()
     for a in range(env.action_space.n):
         q_value = 0
         for _ in range(iterations):
+            if overall_start and (time.time() - overall_start) >= 30:
+                break
             _, r, _, _ = env.step(a)
             q_value += r
-        avg_q = q_value / iterations
+        avg_q = 0
+        if iterations>0: avg_q = q_value / iterations
         if avg_q > best_q:
             best_q = avg_q
             best_action = a
+        if overall_start and (time.time() - overall_start) >= 30:
+            break
     return env.payloads[best_action]
 
-def fuzz_injection_tests(url):
+def fuzz_injection_tests(url, rl_data):
     fs = []
     success_injections = []
     failed_injections = []
-    env = InjectionsEnv()
+    env = InjectionsEnv(rl_data)
+    start_time = time.time()
     for _ in range(len(env.payloads)):
-        injection = run_mcts_for_injections(env,5)
+        if (time.time() - start_time) >= 30:
+            break
+        injection = run_mcts_for_injections(env,5,overall_start=start_time)
         injection_url = f"{url}?inj={urllib.parse.quote(injection)}"
         try:
             r = requests.get(injection_url,timeout=3,headers=CUSTOM_HEADERS)
@@ -547,15 +562,18 @@ def fuzz_injection_tests(url):
         except:
             failed_injections.append(injection)
         env.update_payloads(success_injections, failed_injections)
-    return fs, {"success": success_injections, "fail": failed_injections}
+    return fs, {"success": success_injections, "fail": failed_injections}, env
 
-def fuzz_injection_tests_post(url):
+def fuzz_injection_tests_post(url, rl_data):
     fs = []
     success_injections = []
     failed_injections = []
-    env = InjectionsEnv()
+    env = InjectionsEnv(rl_data)
+    start_time = time.time()
     for _ in range(len(env.payloads)):
-        injection = run_mcts_for_injections(env,5)
+        if (time.time() - start_time) >= 30:
+            break
+        injection = run_mcts_for_injections(env,5,overall_start=start_time)
         try:
             r = requests.post(url, data={"inj": injection}, timeout=3, headers=CUSTOM_HEADERS)
             new_matches = scan_for_vuln_patterns(r.text)
@@ -567,7 +585,7 @@ def fuzz_injection_tests_post(url):
         except:
             failed_injections.append(injection)
         env.update_payloads(success_injections, failed_injections)
-    return fs, {"success_post": success_injections, "fail_post": failed_injections}
+    return fs, {"success_post": success_injections, "fail_post": failed_injections}, env
 
 def repeated_disruption_test(url,attempts=3):
     f = []
@@ -680,15 +698,17 @@ def check_ssl_certificate(url):
                 if subject == issuer:
                     results.append(label_entry("SSL Certificate Issue","ssl-check","Self-signed certificate"))
     except Exception as e:
-        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Error verifying certificate: {str(e)}"))
+        error_details = str(e)
+        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Error verifying certificate: {error_details}"))
     return results
 
 def scan_target(url):
+    rl_data = load_rl_data()
     ds = analyze_query_params(url)
-    injection_findings_get, injection_outcomes_get = fuzz_injection_tests(url)
-    injection_findings_post, injection_outcomes_post = fuzz_injection_tests_post(url)
-    ds.extend(injection_findings_get)
-    ds.extend(injection_findings_post)
+    inj_f_findings_get, inj_outcomes_get, env_get = fuzz_injection_tests(url, rl_data)
+    inj_f_findings_post, inj_outcomes_post, env_post = fuzz_injection_tests_post(url, rl_data)
+    ds.extend(inj_f_findings_get)
+    ds.extend(inj_f_findings_post)
     ds.extend(repeated_disruption_test(url))
     cors_findings = check_cors_misconfiguration(url)
     ds.extend(cors_findings)
@@ -730,7 +750,7 @@ def scan_target(url):
                         ml_tags.append(label_entry(vn,f"ML-based detection (score={prob:.3f})",sn,prob))
         all_tags = ds + p_tags + h_tags + f_tags + d_tags + ml_tags
         funcs = extract_js_functions(r.text)
-        return {
+        combined = {
             "url":url,
             "status_code":r.status_code,
             "reason":r.reason,
@@ -739,12 +759,12 @@ def scan_target(url):
             "extracted_js_functions":funcs,
             "body":r.text,
             "injection_results": {
-                "get": injection_outcomes_get,
-                "post": injection_outcomes_post
+                "get": inj_outcomes_get,
+                "post": inj_outcomes_post
             }
         }
     except Exception as e:
-        return {
+        combined = {
             "url":url,
             "error":str(e),
             "matched_details":ds,
@@ -752,10 +772,26 @@ def scan_target(url):
             "extracted_js_functions":[],
             "body":"",
             "injection_results": {
-                "get": injection_outcomes_get,
-                "post": injection_outcomes_post
+                "get": inj_outcomes_get,
+                "post": inj_outcomes_post
             }
         }
+    combined_rl_data = {
+        "success_counts": {},
+        "total_counts": {}
+    }
+    for p in env_get.success_counts:
+        combined_rl_data["success_counts"][p] = env_get.success_counts[p]
+        combined_rl_data["total_counts"][p] = env_get.total_counts[p]
+    for p in env_post.success_counts:
+        if p not in combined_rl_data["success_counts"]:
+            combined_rl_data["success_counts"][p] = env_post.success_counts[p]
+            combined_rl_data["total_counts"][p] = env_post.total_counts[p]
+        else:
+            combined_rl_data["success_counts"][p] += env_post.success_counts[p]
+            combined_rl_data["total_counts"][p] += env_post.total_counts[p]
+    save_rl_data(combined_rl_data)
+    return combined
 
 def write_scan_results_text(rs,filename="scan_results.txt"):
     with open(filename,"w",encoding="utf-8") as f:
@@ -767,7 +803,7 @@ def write_scan_results_text(rs,filename="scan_results.txt"):
                 for pt,tac,snip,ex,conf in r["matched_details"]:
                     f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
             else:
-                f.write(f"  Status: {r['status_code']} {r['reason']}\n")
+                f.write(f"  Status: {r.get('status_code','N/A')} {r.get('reason','')}\n")
                 if r["matched_details"]:
                     for pt,tac,snip,ex,conf in r["matched_details"]:
                         f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
@@ -871,10 +907,6 @@ def scan_with_chromedriver(url):
         error_details = traceback.format_exc()
         return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":"","found_flags":[]}
 
-"""
-Priority BFS improved to also do a quick subdomain scan at each domain level 
-to expand potential target coverage drastically.
-"""
 def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
     q = []
@@ -891,16 +923,11 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
 
     while q:
         d,u = heapq.heappop(q)
-        print(f"PriorityBFS Depth: {d}")
-        print(f"Full URL: {u}")
-        print("Details: scanning target, scanning with chromedriver, checking SSL, extracting links, enumerating subdomains.")
         if u in visited:
             continue
         if d>max_depth:
             break
         visited.add(u)
-
-        # Subdomain enumeration
         domain_part = urllib.parse.urlsplit(u).netloc
         sub_enumeration = find_subdomains(domain_part)
         for subd in sub_enumeration:
