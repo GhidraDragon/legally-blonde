@@ -19,6 +19,18 @@ from test_sites import test_sites
 import gym
 from gym import spaces
 import numpy as np
+import socket
+import ssl
+
+"""
+Adding additional vulnerability patterns and subdomain enumeration capabilities
+as part of the improvements. Vulnerability analysis comments included inline.
+
+IDOR (Insecure Direct Object Reference) can allow unauthorized users to access objects
+by providing or manipulating object references (IDs) directly, bypassing authorization.
+Exposed Jenkins can disclose administrative consoles. Race condition references can show
+timing-based vulnerabilities. 
+"""
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -65,6 +77,11 @@ XSS_REGEXES = [
     "<script src=['\"]http://[^>]*?>"
 ]
 
+"""
+Added IDOR, Exposed Jenkins, Race Condition checks, etc. 
+These checks can reveal direct object references, Jenkins console leaks, 
+and suspicious patterns that indicate race conditions or concurrency flaws.
+"""
 VULN_PATTERNS = {
     "SQL Error": re.compile(r"(sql\s*exception|sql\s*syntax|warning.*mysql.*|unclosed\s*quotation\s*mark|microsoft\s*ole\s*db\s*provider|odbc\s*sql\s*server\s*driver|pg_query\()",re.IGNORECASE|re.DOTALL),
     "SQL Injection": re.compile(r"(\bunion\s+select\s|\bselect\s+\*\s+from\s|\bsleep\(|\b'or\s+1=1\b|\b'or\s+'a'='a\b|--|#|xp_cmdshell|information_schema)",re.IGNORECASE|re.DOTALL),
@@ -101,7 +118,17 @@ VULN_PATTERNS = {
     "Exposed K8s Secrets": re.compile(r"kube[\s_-]*config|k8s[\s_-]*secret|kubeadm[\s_-]*token",re.IGNORECASE|re.DOTALL),
     "npm Token": re.compile(r"npm[_-]token_[a-z0-9]{36}",re.IGNORECASE|re.DOTALL),
     "GraphQL Injection": re.compile(r"(query\s*\{|\{\s*query\s*|mutation\s*\{|\{\s*mutation\s*)",re.IGNORECASE|re.DOTALL),
-    "Regex DOS": re.compile(r"(\(\?[^\)]*?\)|\[[^\]]{100,}\])",re.IGNORECASE|re.DOTALL)
+    "Regex DOS": re.compile(r"(\(\?[^\)]*?\)|\[[^\]]{100,}\])",re.IGNORECASE|re.DOTALL),
+    "Potential WAF": re.compile(r"(cloudflare|incapsula|mod_security|sucuri\scloudproxy)",re.IGNORECASE),
+    "Exposed .env File": re.compile(r"\.env(\.backup|\.\d+)?", re.IGNORECASE),
+    "Exposed Environment Variable": re.compile(r"(ENV|ENVIRONMENT|SECRET_KEY|DJANGO_SECRET_KEY)=[^\s]+", re.IGNORECASE),
+    "Default Credentials": re.compile(r"(admin:\s*admin|root:\s*root|test:\s*test)", re.IGNORECASE),
+    "Email Leak": re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", re.IGNORECASE),
+    "Phone Number Leak": re.compile(r"\b\+?\d{1,4}[\s-]?\(?\d{1,4}?\)?[\s-]?\d{3}[\s-]?\d{4}\b"),
+    "Possible SSN Leak": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    "Insecure Direct Object Reference (IDOR)": re.compile(r"(user_id=\d+|account_id=\d+|profile_id=\d+)", re.IGNORECASE),
+    "Exposed Jenkins Console": re.compile(r"(jenkins/manage|jenkins/script|x-jenkins)", re.IGNORECASE),
+    "Race Condition": re.compile(r"(threading\.Thread|sleep\(\)|race condition|lockfile)", re.IGNORECASE)
 }
 
 HEADER_PATTERNS = {
@@ -157,7 +184,19 @@ VULN_EXPLANATIONS = {
     "Regex DOS":"Potential catastrophic backtracking in a regex leading to DoS.",
     "CORS Misconfiguration":"Server sets overly broad Access-Control-Allow-Origin or credentials incorrectly.",
     "Insecure HTTP Methods":"Server allows potentially risky HTTP methods like PUT, DELETE, or TRACE.",
-    "No explanation":"No explanation"
+    "No explanation":"No explanation",
+    "Potential WAF":"Site might be behind or protected by a WAF, or the response indicates WAF presence.",
+    "ChromeDriver Error":"Error occurred while using ChromeDriver for scanning",
+    "Exposed .env File":"Potentially exposed .env or backup .env file with sensitive info.",
+    "Exposed Environment Variable":"Possible environment variable or secret in the response.",
+    "Default Credentials":"Found default credentials patterns indicating insecure configuration.",
+    "Email Leak":"Possible email address patterns found in the response.",
+    "Phone Number Leak":"Possible phone number patterns found in the response.",
+    "Possible SSN Leak":"Possible Social Security Number patterns found in the response.",
+    "SSL Certificate Issue":"Possible issues with the certificate, such as expiration, invalid domain, or self-signed certificate that might not be trusted.",
+    "Insecure Direct Object Reference (IDOR)":"Allows unauthorized access or manipulation of objects by modifying direct references (IDs).",
+    "Exposed Jenkins Console":"Possible open Jenkins manage/script console or headers indicating Jenkins environment.",
+    "Race Condition":"Potential concurrency/race scenario references that might lead to inconsistent state or exploit."
 }
 
 def label_entry(label,tactic,snippet,confidence=1.0):
@@ -209,8 +248,32 @@ MULTI_VULN_SAMPLES = {
     "Exposed K8s Secrets":(["kubeconfig","k8s_secret","kubeadm token"],["kube cluster safe"]),
     "npm Token":(["npm_token_123456789012345678901234567890123456"],["safe usage"]),
     "GraphQL Injection":(["query { user(id:\"1\")","mutation { createUser"],["safe gql usage"]),
-    "Regex DOS": (["(a|aa|aaa)*","(x|y|z)+{100,}"],["safe patterns"])
+    "Regex DOS": (["(a|aa|aaa)*","(x|y|z)+{100,}"],["safe patterns"]),
+    "Potential WAF":(["cloudflare","incapsula","mod_security"],["none"]),
+    "Exposed .env File":([".env",".env.backup"],[""]),
+    "Exposed Environment Variable":(["ENV=production","SECRET_KEY=abc123"],[""]),
+    "Default Credentials":(["admin:admin","root:root","test:test"],[""])
 }
+
+CVE_DB = {
+    "apache/2.2.14":"Possible CVEs: CVE-2010-0408, CVE-2010-1452",
+    "nginx/1.10.3":"Possible CVEs: CVE-2017-7529, CVE-2019-20372"
+}
+
+"""
+New function to do simple subdomain enumeration for domain expansions.
+This further improves scanning capabilities by searching potential subdomains.
+"""
+def find_subdomains(domain, subdomains_list=["www","dev","test","admin"]):
+    found_subdomains = []
+    for sub in subdomains_list:
+        potential = f"{sub}.{domain}"
+        try:
+            socket.gethostbyname(potential)
+            found_subdomains.append(potential)
+        except:
+            pass
+    return found_subdomains
 
 def train_base_ml_models():
     if not ML_CLASSIFIER_AVAILABLE:
@@ -352,6 +415,9 @@ def scan_response_headers(headers):
     p = HEADER_PATTERNS["Outdated or Insecure Server"]
     if p.search(srv):
         f.append(label_entry("Outdated or Insecure Server","header-based detection",srv))
+        srv_lower = srv.lower()
+        if srv_lower in CVE_DB:
+            f.append(label_entry("Outdated or Insecure Server","possible-cve-info",CVE_DB[srv_lower]))
     sc = headers.get("Set-Cookie","")
     if sc and ("secure" not in sc.lower() or "httponly" not in sc.lower()):
         f.append(label_entry("Cookies lack 'Secure'/'HttpOnly'","header-based detection",sc))
@@ -483,6 +549,26 @@ def fuzz_injection_tests(url):
         env.update_payloads(success_injections, failed_injections)
     return fs, {"success": success_injections, "fail": failed_injections}
 
+def fuzz_injection_tests_post(url):
+    fs = []
+    success_injections = []
+    failed_injections = []
+    env = InjectionsEnv()
+    for _ in range(len(env.payloads)):
+        injection = run_mcts_for_injections(env,5)
+        try:
+            r = requests.post(url, data={"inj": injection}, timeout=3, headers=CUSTOM_HEADERS)
+            new_matches = scan_for_vuln_patterns(r.text)
+            fs.extend(new_matches)
+            if new_matches:
+                success_injections.append(injection)
+            else:
+                failed_injections.append(injection)
+        except:
+            failed_injections.append(injection)
+        env.update_payloads(success_injections, failed_injections)
+    return fs, {"success_post": success_injections, "fail_post": failed_injections}
+
 def repeated_disruption_test(url,attempts=3):
     f = []
     for _ in range(attempts):
@@ -492,6 +578,12 @@ def repeated_disruption_test(url,attempts=3):
                 f.append(label_entry("Service Disruption","frequent-request detection",str(r.status_code)))
         except:
             f.append(label_entry("Service Disruption","frequent-request detection","Exception"))
+    try:
+        r_head = requests.head(url, timeout=3, headers=CUSTOM_HEADERS)
+        if r_head.status_code >= 500:
+            f.append(label_entry("Service Disruption","head-request detection",str(r_head.status_code)))
+    except:
+        f.append(label_entry("Service Disruption","head-request detection","Exception"))
     return f
 
 def extract_js_functions(ht):
@@ -532,15 +624,78 @@ def check_insecure_http_methods(url):
         pass
     return findings
 
+def check_robots_txt(url):
+    findings = []
+    domain = urllib.parse.urlsplit(url).netloc
+    if not domain:
+        return findings
+    robots_url = f"https://{domain}/robots.txt"
+    try:
+        rr = requests.get(robots_url, headers=CUSTOM_HEADERS, timeout=3)
+        if rr.status_code == 200:
+            lines = rr.text.splitlines()
+            for line in lines:
+                if line.lower().startswith("disallow:") or "admin" in line.lower() or "cgi-bin" in line.lower() or "wp-admin" in line.lower() or "secret" in line.lower():
+                    snippet = line.strip()
+                    if len(snippet) > 200: snippet = snippet[:200] + "..."
+                    findings.append(label_entry("Potential sensitive path from robots.txt","robots-txt detection",snippet))
+    except:
+        pass
+    return findings
+
+def check_ssl_certificate(url):
+    results = []
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        return results
+    hostname = parsed.netloc.split(":")[0]
+    port = 443
+    context = ssl.create_default_context()
+    try:
+        with socket.create_connection((hostname, port), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                if not cert:
+                    results.append(label_entry("SSL Certificate Issue","ssl-check","No certificate returned"))
+                    return results
+                subject = cert.get('subject',[])
+                issuer = cert.get('issuer',[])
+                notAfter = cert.get('notAfter','')
+                notBefore = cert.get('notBefore','')
+                if not notAfter or not notBefore:
+                    results.append(label_entry("SSL Certificate Issue","ssl-check","Missing certificate date fields"))
+                    return results
+                try:
+                    expires = time.strptime(notAfter, "%b %d %H:%M:%S %Y %Z")
+                    if time.mktime(expires) < time.time():
+                        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Certificate expired on {notAfter}"))
+                except:
+                    results.append(label_entry("SSL Certificate Issue","ssl-check",f"Cannot parse notAfter={notAfter}"))
+                try:
+                    begins = time.strptime(notBefore, "%b %d %H:%M:%S %Y %Z")
+                    if time.mktime(begins) > time.time():
+                        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Certificate not yet valid until {notBefore}"))
+                except:
+                    results.append(label_entry("SSL Certificate Issue","ssl-check",f"Cannot parse notBefore={notBefore}"))
+                if subject == issuer:
+                    results.append(label_entry("SSL Certificate Issue","ssl-check","Self-signed certificate"))
+    except Exception as e:
+        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Error verifying certificate: {str(e)}"))
+    return results
+
 def scan_target(url):
     ds = analyze_query_params(url)
-    injection_findings, injection_outcomes = fuzz_injection_tests(url)
-    ds.extend(injection_findings)
+    injection_findings_get, injection_outcomes_get = fuzz_injection_tests(url)
+    injection_findings_post, injection_outcomes_post = fuzz_injection_tests_post(url)
+    ds.extend(injection_findings_get)
+    ds.extend(injection_findings_post)
     ds.extend(repeated_disruption_test(url))
     cors_findings = check_cors_misconfiguration(url)
     ds.extend(cors_findings)
     method_findings = check_insecure_http_methods(url)
     ds.extend(method_findings)
+    robots_findings = check_robots_txt(url)
+    ds.extend(robots_findings)
     try:
         r = requests.get(url,timeout=5,headers=CUSTOM_HEADERS)
         b = r.text[:MAX_BODY_SNIPPET_LEN]
@@ -583,7 +738,10 @@ def scan_target(url):
             "matched_details":all_tags,
             "extracted_js_functions":funcs,
             "body":r.text,
-            "injection_results": injection_outcomes
+            "injection_results": {
+                "get": injection_outcomes_get,
+                "post": injection_outcomes_post
+            }
         }
     except Exception as e:
         return {
@@ -593,7 +751,10 @@ def scan_target(url):
             "server":"Unknown",
             "extracted_js_functions":[],
             "body":"",
-            "injection_results": injection_outcomes
+            "injection_results": {
+                "get": injection_outcomes_get,
+                "post": injection_outcomes_post
+            }
         }
 
 def write_scan_results_text(rs,filename="scan_results.txt"):
@@ -611,12 +772,20 @@ def write_scan_results_text(rs,filename="scan_results.txt"):
                     for pt,tac,snip,ex,conf in r["matched_details"]:
                         f.write(f"    {pt}\n      Tactic: {tac}\n      Explanation: {ex}\n      Snippet: {snip}\n")
             f.write("  Injection Test Details:\n")
-            success_injs = r["injection_results"].get("success",[])
-            fail_injs = r["injection_results"].get("fail",[])
-            f.write(f"    Successful Injections ({len(success_injs)}): {success_injs}\n")
-            f.write("      Meaning: Payloads that triggered detection or anomalies.\n")
-            f.write(f"    Failed Injections ({len(fail_injs)}): {fail_injs}\n")
-            f.write("      Meaning: Payloads that did not produce notable detection.\n")
+            g = r["injection_results"].get("get",{})
+            p = r["injection_results"].get("post",{})
+            success_injs_get = g.get("success",[])
+            fail_injs_get = g.get("fail",[])
+            success_injs_post = p.get("success_post",[])
+            fail_injs_post = p.get("fail_post",[])
+            f.write(f"    Successful GET Injections ({len(success_injs_get)}): {success_injs_get}\n")
+            f.write("      Meaning: GET payloads that triggered detection.\n")
+            f.write(f"    Failed GET Injections ({len(fail_injs_get)}): {fail_injs_get}\n")
+            f.write("      Meaning: GET payloads that did not produce notable issues.\n")
+            f.write(f"    Successful POST Injections ({len(success_injs_post)}): {success_injs_post}\n")
+            f.write("      Meaning: POST payloads that triggered detection.\n")
+            f.write(f"    Failed POST Injections ({len(fail_injs_post)}): {fail_injs_post}\n")
+            f.write("      Meaning: POST payloads that did not produce notable issues.\n")
             if r.get("extracted_js_functions"):
                 f.write("  JS Functions:\n")
                 for funcdef in r["extracted_js_functions"]:
@@ -702,6 +871,10 @@ def scan_with_chromedriver(url):
         error_details = traceback.format_exc()
         return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":"","found_flags":[]}
 
+"""
+Priority BFS improved to also do a quick subdomain scan at each domain level 
+to expand potential target coverage drastically.
+"""
 def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
     q = []
@@ -714,22 +887,41 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
     results = []
     http_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
     bot_executor = concurrent.futures.ThreadPoolExecutor(max_workers=50)
+    ssl_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+
     while q:
         d,u = heapq.heappop(q)
         print(f"PriorityBFS Depth: {d}")
         print(f"Full URL: {u}")
-        print("Details: scanning target, scanning with chromedriver, extracting links.")
+        print("Details: scanning target, scanning with chromedriver, checking SSL, extracting links, enumerating subdomains.")
         if u in visited:
             continue
         if d>max_depth:
             break
         visited.add(u)
+
+        # Subdomain enumeration
+        domain_part = urllib.parse.urlsplit(u).netloc
+        sub_enumeration = find_subdomains(domain_part)
+        for subd in sub_enumeration:
+            potential_url = f"http://{subd}"
+            if potential_url not in visited:
+                heapq.heappush(q,(d+1,potential_url))
+                depth_map[potential_url] = d+1
+                G.add_node(potential_url,depth=d+1)
+                G.add_edge(u,potential_url)
+
         f1 = http_executor.submit(scan_target,u)
         f2 = bot_executor.submit(scan_with_chromedriver,u)
+        f3 = ssl_executor.submit(check_ssl_certificate,u)
+
         r1 = f1.result()
         r2 = f2.result()
+        r3 = f3.result()
+
         body1 = r1["body"] if "body" in r1 else ""
         body2 = r2["data"] if "data" in r2 else ""
+
         if "error" not in r1:
             new_links = extract_links_from_html(u,body1)
             for nl in new_links:
@@ -746,14 +938,18 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
                     depth_map[nl2] = d+1
                     G.add_node(nl2,depth=d+1)
                     G.add_edge(u,nl2)
+
         combined_details = r1["matched_details"] if "matched_details" in r1 else []
+        combined_details.extend(r3)
         if r2["error"]:
             combined_details.append(label_entry("ChromeDriver Error","browser-based detection",r2["error"]))
         else:
             combined_details.extend(scan_for_vuln_patterns(body2))
+
         combined_js = r1.get("extracted_js_functions",[])
         if body2:
             combined_js.extend(extract_js_functions(body2))
+
         final = {
             "url":u,
             "server":r1.get("server","Unknown"),
@@ -766,8 +962,11 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
             "injection_results": r1.get("injection_results",{})
         }
         results.append(final)
+
     http_executor.shutdown()
     bot_executor.shutdown()
+    ssl_executor.shutdown()
+
     max_d = max(depth_map.values()) if depth_map else 0
     if max_d > max_depth:
         max_d = max_depth
@@ -779,13 +978,14 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         nx.draw_networkx(subG, pos, with_labels=True)
         plt.title(f"Layer {layer}")
         plt.show()
+
     return results
 
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     train_base_ml_models()
     train_all_vulnerability_models()
-    user_depth = 2
+    user_depth = 3
     if len(sys.argv) > 1:
         try:
             user_depth = int(sys.argv[1])
@@ -797,13 +997,17 @@ def main():
         if "error" in r and r["error"]:
             print(f"  Error: {r['error']}")
         for pt,tactic,snippet,explanation,conf in r["matched_details"]:
-            print(f"  Detected: {pt}\n    Explanation: {explanation}\n    Tactic: {tactic}\n    Snippet: {snippet}")
-        si = r["injection_results"].get("success",[])
-        fi = r["injection_results"].get("fail",[])
-        print(f"  Injection Test Successes ({len(si)}): {si}")
-        print("    Meaning: The payload triggered some detection or anomaly.")
-        print(f"  Injection Test Failures ({len(fi)}): {fi}")
-        print("    Meaning: The payload did not produce any notable issues.")
+            print(f"  Detected: {pt}\n    Explanation: {explanation}\n    Tactic: {tactic}\n    Confidence: {conf}\n    Snippet: {snippet}")
+        g_res = r["injection_results"].get("get",{})
+        p_res = r["injection_results"].get("post",{})
+        sg = g_res.get("success",[])
+        fg = g_res.get("fail",[])
+        sp = p_res.get("success_post",[])
+        fp = p_res.get("fail_post",[])
+        print(f"  GET Injections Succeeded ({len(sg)}): {sg}")
+        print(f"  GET Injections Failed ({len(fg)}): {fg}")
+        print(f"  POST Injections Succeeded ({len(sp)}): {sp}")
+        print(f"  POST Injections Failed ({len(fp)}): {fp}")
         if r.get("extracted_js_functions"):
             print("  Extracted JS Functions:")
             for f_ in r["extracted_js_functions"]:
