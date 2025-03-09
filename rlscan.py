@@ -497,19 +497,14 @@ class InjectionsEnv(gym.Env):
             if f not in self.total_counts:
                 self.total_counts[f] = 0
             self.total_counts[f] += 1
-
         to_remove = []
         for p in self.payloads:
-            # Changed here to avoid KeyError:
-            tc = self.total_counts.get(p, 0)
-            if tc >= 5:
-                sc = self.success_counts.get(p, 0)
+            if self.total_counts[p] >= 5:
                 ratio = 0
-                if tc > 0:
-                    ratio = sc / float(tc)
+                if self.total_counts[p] > 0:
+                    ratio = self.success_counts[p] / float(self.total_counts[p])
                 if ratio < 0.2:
                     to_remove.append(p)
-
         for r in to_remove:
             if r in self.payloads:
                 self.payloads.remove(r)
@@ -517,14 +512,12 @@ class InjectionsEnv(gym.Env):
                     del self.success_counts[r]
                 if r in self.total_counts:
                     del self.total_counts[r]
-
         if random.random() < 0.3 and self.new_payloads_pool:
             new_p = random.choice(self.new_payloads_pool)
             if new_p not in self.payloads:
                 self.payloads.append(new_p)
                 self.success_counts[new_p] = 0
                 self.total_counts[new_p] = 0
-
         self.action_space = spaces.Discrete(len(self.payloads))
 
 def run_mcts_for_injections(env,iterations=10,overall_start=None):
