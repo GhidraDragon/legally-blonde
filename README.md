@@ -1,3 +1,5 @@
+[https://docs.google.com/document/d/12yyNXhfdMLoZuvdV7TxO-JMuSwWhngFJ59WDjUWnz6s/edit?usp=sharing](https://docs.google.com/document/d/12yyNXhfdMLoZuvdV7TxO-JMuSwWhngFJ59WDjUWnz6s/edit?usp=sharing)
+
 ![image](https://github.com/user-attachments/assets/1be58e7d-6e5f-4cbb-b29c-d2e3f1b2c7eb)
 
 ![image](https://github.com/user-attachments/assets/802cb78a-2c18-40e9-a485-5f914512f0ff)
